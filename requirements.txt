@@ -1,0 +1,25 @@
+# Vector-Verse: Semantic Similarity Explorer
+# Python 3.10+ required
+
+# Web framework
+streamlit>=1.28.0
+
+# OpenAI API
+openai>=1.3.0
+
+# Scientific computing
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# Dimensionality reduction
+umap-learn>=0.5.4
+
+# Visualization
+plotly>=5.18.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Data serialization
+pyarrow>=14.0.0
