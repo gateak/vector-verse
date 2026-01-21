@@ -3,7 +3,8 @@ VectorStore: Central orchestrator for Vector-Verse.
 Manages data loading, embedding, caching, and similarity search.
 """
 
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -61,13 +62,21 @@ class VectorStore:
         
         # ID to index mapping for fast lookup
         self._id_to_idx: dict[str, int] = {}
+        
+        # Track initialization state
+        self._initialized = False
     
     @property
     def cache_key(self) -> str:
         """Generate unique cache key for this dataset+embedder combination."""
         return f"{self.dataset_loader.name}_{self.embedder.name}"
     
-    def initialize(self, progress_callback=None) -> None:
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the store has been initialized."""
+        return self._initialized
+    
+    def initialize(self, progress_callback: Optional[Callable[[str], None]] = None) -> None:
         """
         Initialize the vector store: load data, embed, and compute UMAP.
         
@@ -80,6 +89,9 @@ class VectorStore:
         3. Fits or loads UMAP model
         4. Merges custom items (always recomputed)
         """
+        if self._initialized:
+            return
+        
         def log(msg: str):
             if progress_callback:
                 progress_callback(msg)
@@ -104,6 +116,7 @@ class VectorStore:
         # Build ID index
         self._build_id_index()
         
+        self._initialized = True
         log(f"Ready! {len(self.items_df)} items loaded.")
     
     def _load_from_cache(self) -> None:
@@ -120,23 +133,47 @@ class VectorStore:
             self.umap_coords = self._cache.load_umap_coords()
             self.projector.set_model(self._cache.load_umap_model())
     
-    def _build_from_scratch(self, log) -> None:
+    def _build_from_scratch(self, log: Callable[[str], None]) -> None:
         """Compute embeddings and UMAP from scratch."""
+        # Check for partial cache (embeddings done but not UMAP)
+        partial_embeddings_path = self._cache.cache_path / "embeddings_partial.npz"
+        
         # Load primary dataset
         log(f"Loading {self.dataset_loader.name}...")
         self.items_df = self.dataset_loader.load()
         log(f"Loaded {len(self.items_df)} items")
         
-        # Generate embeddings
-        texts = self.items_df["text"].tolist()
-        log(f"Generating embeddings for {len(texts)} texts...")
-        self.embeddings = self.embedder.embed(texts)
+        # Check if we have partial progress
+        if partial_embeddings_path.exists() and not self.force_rebuild:
+            log("Found partial embeddings, resuming...")
+            data = np.load(partial_embeddings_path)
+            existing_embeddings = data["embeddings"]
+            start_idx = len(existing_embeddings)
+            
+            if start_idx < len(self.items_df):
+                # Resume from where we left off
+                remaining_texts = self.items_df["text"].tolist()[start_idx:]
+                log(f"Resuming embeddings from item {start_idx}...")
+                new_embeddings = self.embedder.embed(remaining_texts)
+                self.embeddings = np.vstack([existing_embeddings, new_embeddings])
+            else:
+                self.embeddings = existing_embeddings
+        else:
+            # Generate embeddings with incremental saving
+            texts = self.items_df["text"].tolist()
+            log(f"Generating embeddings for {len(texts)} texts...")
+            self.embeddings = self._embed_with_checkpoints(texts, log)
+        
         log(f"Embeddings shape: {self.embeddings.shape}")
         
+        # Clean up partial file
+        if partial_embeddings_path.exists():
+            partial_embeddings_path.unlink()
+        
         # Fit UMAP
-        log("Fitting UMAP projection...")
+        log("Fitting UMAP projection (this takes a minute)...")
         self.projector = UMAPProjector()
-        self.umap_coords = self.projector.fit(self.embeddings)
+        self.umap_coords = self.projector.fit(self.embeddings, show_progress=False)
         
         # Save to cache
         log("Saving to cache...")
@@ -144,7 +181,50 @@ class VectorStore:
         self._cache.save_items(self.items_df)
         self._cache.save_umap(self.umap_coords, self.projector.get_model())
     
-    def _merge_custom_items(self, log) -> None:
+    def _embed_with_checkpoints(
+        self,
+        texts: list[str],
+        log: Callable[[str], None],
+        checkpoint_every: int = 20
+    ) -> np.ndarray:
+        """
+        Embed texts with periodic checkpoints to allow resuming.
+        
+        Args:
+            texts: List of texts to embed
+            log: Logging function
+            checkpoint_every: Save checkpoint every N batches
+            
+        Returns:
+            Embeddings array
+        """
+        partial_path = self._cache.cache_path / "embeddings_partial.npz"
+        self._cache._ensure_cache_dir()
+        
+        all_embeddings = []
+        batch_size = self.embedder.batch_size
+        n_batches = (len(texts) + batch_size - 1) // batch_size
+        
+        for batch_num in range(n_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, len(texts))
+            batch_texts = texts[start_idx:end_idx]
+            
+            log(f"Embedding batch {batch_num + 1}/{n_batches}...")
+            
+            # Embed this batch
+            batch_embeddings = self.embedder.embed(batch_texts, show_progress=False)
+            all_embeddings.append(batch_embeddings)
+            
+            # Save checkpoint periodically
+            if (batch_num + 1) % checkpoint_every == 0:
+                current_embeddings = np.vstack(all_embeddings)
+                np.savez_compressed(partial_path, embeddings=current_embeddings)
+                log(f"Checkpoint saved ({end_idx}/{len(texts)} items)")
+        
+        return np.vstack(all_embeddings)
+    
+    def _merge_custom_items(self, log: Callable[[str], None]) -> None:
         """Merge custom items into the dataset."""
         custom_df = self.custom_loader.load()
         

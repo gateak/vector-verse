@@ -18,7 +18,7 @@ CUSTOM_ITEMS_PATH = DATA_DIR / "custom_items.csv"
 DEFAULT_EMBEDDER = "openai"
 OPENAI_MODEL = "text-embedding-3-small"
 OPENAI_EMBEDDING_DIM = 1536
-OPENAI_BATCH_SIZE = 100  # Texts per API call
+OPENAI_BATCH_SIZE = 50  # Texts per API call (reduced to avoid rate limits)
 
 # UMAP settings
 UMAP_N_NEIGHBORS = 15

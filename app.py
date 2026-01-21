@@ -139,10 +139,6 @@ st.markdown("""
 
 def init_session_state():
     """Initialize session state variables."""
-    if "vector_store" not in st.session_state:
-        st.session_state.vector_store = None
-    if "initialized" not in st.session_state:
-        st.session_state.initialized = False
     if "selected_item_id" not in st.session_state:
         st.session_state.selected_item_id = None
     if "search_results" not in st.session_state:
@@ -157,39 +153,38 @@ init_session_state()
 
 
 # -----------------------------------------------------------------------------
-# Data Loading
+# Data Loading - Cached to survive refreshes
 # -----------------------------------------------------------------------------
 
-@st.cache_resource
-def load_vector_store(force_rebuild: bool = False):
-    """Load and cache the vector store."""
-    vs = VectorStore(force_rebuild=force_rebuild)
+@st.cache_resource(show_spinner=False)
+def get_vector_store() -> VectorStore:
+    """
+    Get or create the VectorStore. Cached so it survives page refreshes.
+    """
+    vs = VectorStore()
     return vs
 
 
-def initialize_app(force_rebuild: bool = False):
-    """Initialize the application with data."""
-    progress_container = st.empty()
+def initialize_store(vs: VectorStore) -> bool:
+    """
+    Initialize the vector store if needed.
+    Returns True if ready, False if still loading.
+    """
+    if vs.is_initialized:
+        return True
     
-    with progress_container:
-        with st.spinner("Initializing Vector-Verse..."):
-            progress_text = st.empty()
-            
-            def update_progress(msg: str):
-                progress_text.text(msg)
-            
-            # Load vector store
-            vs = load_vector_store(force_rebuild)
-            
-            if not st.session_state.initialized or force_rebuild:
-                vs.initialize(progress_callback=update_progress)
-                st.session_state.vector_store = vs
-                st.session_state.initialized = True
-            
-            progress_text.empty()
+    # Check if cache exists - if so, load quickly
+    from vector_verse.cache.manager import CacheManager
+    cache = CacheManager(vs.cache_key)
     
-    progress_container.empty()
-    return st.session_state.vector_store
+    if cache.exists():
+        # Cache exists, load it (fast)
+        with st.spinner("Loading from cache..."):
+            vs.initialize()
+        return True
+    else:
+        # Need to build - show progress
+        return False
 
 
 # -----------------------------------------------------------------------------
@@ -202,13 +197,50 @@ def render_header():
     st.markdown('<p class="sub-header">Semantic Similarity Explorer for Text</p>', unsafe_allow_html=True)
 
 
+def render_loading_screen(vs: VectorStore):
+    """Render the loading/embedding progress screen."""
+    st.markdown("### Building Embedding Index")
+    st.markdown("""
+    This is a one-time process. The embeddings will be cached for future use.
+    
+    **Please don't refresh the page** - progress is saved periodically.
+    """)
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    def update_progress(msg: str):
+        status_text.text(msg)
+        # Parse batch progress if available
+        if "batch" in msg.lower():
+            try:
+                parts = msg.split()
+                for i, p in enumerate(parts):
+                    if "/" in p:
+                        current, total = p.split("/")
+                        current = int(current)
+                        total = int(total.rstrip("..."))
+                        progress_bar.progress(current / total)
+                        break
+            except:
+                pass
+    
+    try:
+        vs.initialize(progress_callback=update_progress)
+        progress_bar.progress(1.0)
+        status_text.text("Done! Refreshing...")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error during initialization: {str(e)}")
+        st.exception(e)
+
+
 def render_sidebar(vs: VectorStore):
     """Render the sidebar controls."""
     with st.sidebar:
         st.markdown("### Settings")
         
         # Cache info
-        cache_info = vs.get_cache_info()
         st.markdown(f"**Items:** {vs.n_items:,}")
         if vs.n_custom_items > 0:
             st.markdown(f"**Custom items:** {vs.n_custom_items}")
@@ -217,7 +249,7 @@ def render_sidebar(vs: VectorStore):
         
         # Rebuild cache option
         if st.button("🔄 Rebuild Cache", help="Re-embed all items and recompute UMAP"):
-            st.session_state.initialized = False
+            vs.clear_cache()
             st.cache_resource.clear()
             st.rerun()
         
@@ -428,13 +460,22 @@ def main():
             st.error("No data available. Please add a dataset or custom items.")
             st.stop()
     
-    # Initialize
-    try:
-        vs = initialize_app()
-    except Exception as e:
-        st.error(f"Failed to initialize: {str(e)}")
-        st.exception(e)
-        st.stop()
+    # Get cached vector store
+    vs = get_vector_store()
+    
+    # Initialize if needed
+    if not vs.is_initialized:
+        from vector_verse.cache.manager import CacheManager
+        cache = CacheManager(vs.cache_key)
+        
+        if cache.exists():
+            # Quick load from cache
+            with st.spinner("Loading from cache..."):
+                vs.initialize()
+        else:
+            # Need to build - show loading screen
+            render_loading_screen(vs)
+            st.stop()
     
     # Render sidebar
     render_sidebar(vs)

@@ -5,7 +5,7 @@ Uses text-embedding-3-small for high-quality multilingual embeddings.
 
 import os
 import time
-from typing import Optional
+from typing import Optional, Callable
 
 import numpy as np
 from openai import OpenAI
@@ -42,7 +42,7 @@ class OpenAIEmbedder(BaseEmbedder):
         
         Args:
             model: OpenAI model name (default: text-embedding-3-small)
-            batch_size: Number of texts per API call (default: 100)
+            batch_size: Number of texts per API call (default: 50)
             api_key: Optional API key (defaults to OPENAI_API_KEY env var)
         """
         self.model = model
@@ -67,13 +67,19 @@ class OpenAIEmbedder(BaseEmbedder):
     def dimension(self) -> int:
         return self._dimension
     
-    def embed(self, texts: list[str], show_progress: bool = True) -> np.ndarray:
+    def embed(
+        self,
+        texts: list[str],
+        show_progress: bool = True,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> np.ndarray:
         """
         Embed texts using OpenAI API.
         
         Args:
             texts: List of text strings to embed
             show_progress: Whether to print progress (for large batches)
+            progress_callback: Optional callback(batch_num, total_batches) for UI updates
             
         Returns:
             np.ndarray of shape (len(texts), dimension), L2-normalized
@@ -91,12 +97,19 @@ class OpenAIEmbedder(BaseEmbedder):
             if show_progress and n_batches > 1:
                 print(f"Embedding batch {batch_num}/{n_batches}...")
             
+            if progress_callback:
+                progress_callback(batch_num, n_batches)
+            
             # Clean texts (remove empty strings, limit length)
             cleaned_batch = [self._clean_text(t) for t in batch]
             
             # Call API with retry logic
             embeddings = self._embed_batch_with_retry(cleaned_batch)
             all_embeddings.extend(embeddings)
+            
+            # Small delay between batches to avoid rate limits
+            if i + self.batch_size < len(texts):
+                time.sleep(0.1)
         
         # Stack and normalize
         embeddings_array = np.array(all_embeddings, dtype=np.float32)
@@ -118,8 +131,8 @@ class OpenAIEmbedder(BaseEmbedder):
     def _embed_batch_with_retry(
         self,
         texts: list[str],
-        max_retries: int = 3,
-        base_delay: float = 1.0
+        max_retries: int = 5,
+        base_delay: float = 2.0
     ) -> list[list[float]]:
         """
         Embed a batch with retry logic for rate limits.
@@ -146,7 +159,7 @@ class OpenAIEmbedder(BaseEmbedder):
                 error_msg = str(e).lower()
                 
                 # Check if it's a rate limit error
-                if "rate" in error_msg or "limit" in error_msg:
+                if "rate" in error_msg or "limit" in error_msg or "429" in str(e):
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
                         print(f"Rate limited. Waiting {delay}s before retry...")
@@ -158,13 +171,13 @@ class OpenAIEmbedder(BaseEmbedder):
         
         raise RuntimeError(f"Failed to embed batch after {max_retries} attempts")
     
-    def _clean_text(self, text: str, max_tokens: int = 8000) -> str:
+    def _clean_text(self, text: str, max_chars: int = 20000) -> str:
         """
         Clean and truncate text for embedding.
         
         Args:
             text: Raw text
-            max_tokens: Approximate max tokens (using char estimate)
+            max_chars: Maximum characters (conservative limit for 8191 token model)
             
         Returns:
             Cleaned text
@@ -173,10 +186,10 @@ class OpenAIEmbedder(BaseEmbedder):
             return " "  # Empty strings cause API errors
         
         # Basic cleaning
-        text = text.strip()
+        text = str(text).strip()
         
-        # Rough truncation (1 token ≈ 4 chars for English)
-        max_chars = max_tokens * 4
+        # Conservative truncation to stay under 8191 token limit
+        # Using ~2.5 chars per token estimate to be safe with varied content
         if len(text) > max_chars:
             text = text[:max_chars]
         
