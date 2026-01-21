@@ -187,6 +187,8 @@ def init_session_state():
         st.session_state.color_by = None
     if "lasso_selection" not in st.session_state:
         st.session_state.lasso_selection = None
+    if "view_3d" not in st.session_state:
+        st.session_state.view_3d = False
 
 
 init_session_state()
@@ -311,6 +313,11 @@ def render_sidebar(vs: VectorStore):
         
         st.markdown("---")
         
+        # 2D/3D view toggle
+        render_view_toggle(vs)
+        
+        st.markdown("---")
+        
         # Rebuild cache option
         if st.button("🔄 Rebuild Cache", help="Re-embed all items and recompute UMAP"):
             vs.clear_cache()
@@ -426,6 +433,24 @@ def render_color_selector():
         st.session_state.color_by = selected
 
 
+def render_view_toggle(vs):
+    """Render 2D/3D view toggle."""
+    st.markdown("### 🔮 View Mode")
+    
+    view_3d = st.toggle(
+        "3D View",
+        value=st.session_state.view_3d,
+        help="Switch between 2D and 3D UMAP projection"
+    )
+    
+    if view_3d != st.session_state.view_3d:
+        st.session_state.view_3d = view_3d
+        
+        # If switching to 3D, ensure 3D coords exist
+        if view_3d and not vs.has_3d_umap:
+            st.rerun()  # Will trigger computation in main
+
+
 def render_zoom_controls(vs: VectorStore):
     """Render zoom breadcrumb and controls."""
     zm = get_or_create_zoom_manager(vs)
@@ -518,12 +543,27 @@ def render_visualization(vs: VectorStore):
     """Render the UMAP scatter plot."""
     builder = ScatterPlotBuilder()
     
+    # Check if 3D view is requested
+    is_3d = st.session_state.view_3d
+    
     # Get current zoom level data
     zm = get_or_create_zoom_manager(vs)
     
-    if zm.is_zoomed:
+    # For 3D mode, we need 3D coordinates
+    if is_3d and not zm.is_zoomed:
+        # Ensure 3D coords exist (compute if needed)
+        if vs.umap_coords_3d is None:
+            with st.spinner("Computing 3D UMAP projection (first time only)..."):
+                vs.ensure_3d_umap()
+        current_coords = vs.umap_coords_3d
+        current_df = vs.items_df
+    elif zm.is_zoomed:
+        # For zoomed views, we use 2D only (3D zoom not implemented yet)
         current_df = zm.get_subset_items(vs.items_df)
         current_coords = zm.get_current_coords()
+        if is_3d:
+            st.info("3D view is not available when zoomed. Showing 2D view.")
+            is_3d = False
     else:
         current_df = vs.items_df
         current_coords = vs.umap_coords
@@ -544,40 +584,55 @@ def render_visualization(vs: VectorStore):
     if color_by in ["decade", "year", "date_bucket"]:
         color_type = "sequential"
     
+    # Get query coords (need 3D coords for 3D view)
+    query_coords = None
+    if st.session_state.query_coords is not None and not zm.is_zoomed:
+        if is_3d and vs.projector_3d is not None and vs.projector_3d.is_fitted:
+            # Re-project query to 3D space
+            # We need the query embedding, but we only stored the 2D coords
+            # For simplicity, skip query point in 3D view
+            query_coords = None
+        else:
+            query_coords = st.session_state.query_coords
+    
     # Build plot
     fig = builder.build(
         df=current_df,
         coords=current_coords,
         selected_id=st.session_state.selected_item_id,
         neighbor_ids=neighbor_ids,
-        query_coords=st.session_state.query_coords if not zm.is_zoomed else None,
-        query_text=st.session_state.search_query if st.session_state.query_coords is not None else None,
+        query_coords=query_coords,
+        query_text=st.session_state.search_query if query_coords is not None else None,
         color_by=color_by,
         color_type=color_type,
-        enable_lasso=True
+        enable_lasso=not is_3d,  # Disable lasso in 3D mode
+        mode_3d=is_3d,
     )
     
-    # Render with selection callback
-    selection = st.plotly_chart(
-        fig,
-        use_container_width=True,
-        key="umap_plot",
-        on_select="rerun",
-        selection_mode="lasso"
-    )
-    
-    # Handle lasso selection
-    if selection and "selection" in selection and selection["selection"].get("points"):
-        points = selection["selection"]["points"]
-        if points:
-            # Extract indices from selection
-            selected_indices = []
-            for point in points:
-                if "point_indices" in point:
-                    selected_indices.extend(point["point_indices"])
-            
-            if selected_indices:
-                st.session_state.lasso_selection = list(set(selected_indices))
+    # Render with selection callback (lasso only works in 2D)
+    if is_3d:
+        st.plotly_chart(fig, use_container_width=True, key="umap_plot_3d")
+    else:
+        selection = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="umap_plot",
+            on_select="rerun",
+            selection_mode="lasso"
+        )
+        
+        # Handle lasso selection
+        if selection and "selection" in selection and selection["selection"].get("points"):
+            points = selection["selection"]["points"]
+            if points:
+                # Extract indices from selection
+                selected_indices = []
+                for point in points:
+                    if "point_indices" in point:
+                        selected_indices.extend(point["point_indices"])
+                
+                if selected_indices:
+                    st.session_state.lasso_selection = list(set(selected_indices))
 
 
 def render_item_details(vs: VectorStore):
@@ -630,7 +685,9 @@ def render_getting_started():
     
     **Zoom:** Select points with the lasso tool, then click "Zoom Into Selection" to re-run UMAP on the subset for finer detail.
     
-    The visualization shows all items projected into 2D space using UMAP.
+    **3D View:** Toggle "3D View" in the sidebar to see clusters in 3D space — great for visualizing separation between clusters!
+    
+    The visualization shows all items projected into 2D/3D space using UMAP.
     Items that are semantically similar appear close together.
     """)
     
@@ -755,11 +812,14 @@ def render_methodology_tab():
     ### 🗺️ UMAP: Visualizing High Dimensions
     
     We use **UMAP** (Uniform Manifold Approximation and Projection) to reduce 1536 dimensions 
-    down to 2 for visualization. UMAP is chosen because it:
+    down to 2D or 3D for visualization. UMAP is chosen because it:
     
     - Preserves **local neighborhoods** (similar items stay close)
     - Maintains **global structure** (clusters remain separated)
     - Works well with high-dimensional embedding spaces
+    
+    **2D vs 3D**: The 3D projection can reveal cluster separations that are hidden in 2D.
+    Some clusters that overlap in 2D may be clearly separated in the third dimension!
     
     ### 🔍 Similarity Search
     
@@ -834,11 +894,13 @@ def render_architecture_tab():
     ┌─────────────────────────────────────────────────────────────────┐
     │                      Cache Layer                                 │
     │  CacheManager: cache/{dataset}_{embedder}/                      │
-    │  • embeddings.npz   (vectors)                                   │
-    │  • items.parquet    (metadata)                                  │
-    │  • umap_coords.npz  (2D coords)                                 │
-    │  • umap_model.pkl   (fitted UMAP)                               │
-    │  • zoom_levels/     (subset projections)                        │
+    │  • embeddings.npz      (vectors)                                │
+    │  • items.parquet       (metadata)                               │
+    │  • umap_coords.npz     (2D coords)                              │
+    │  • umap_coords_3d.npz  (3D coords)                              │
+    │  • umap_model.pkl      (fitted 2D UMAP)                         │
+    │  • umap_model_3d.pkl   (fitted 3D UMAP)                         │
+    │  • zoom_levels/        (subset projections)                     │
     └───────────────────────────────┬─────────────────────────────────┘
                                     │
                                     ▼

@@ -67,6 +67,10 @@ class OpenAIEmbedder(BaseEmbedder):
     def dimension(self) -> int:
         return self._dimension
     
+    # OpenAI's max tokens per embedding request
+    MAX_TOKENS_PER_REQUEST = 290000  # Leave some buffer below 300k limit
+    CHARS_PER_TOKEN_ESTIMATE = 3.5  # Conservative estimate
+    
     def embed(
         self,
         texts: list[str],
@@ -74,7 +78,7 @@ class OpenAIEmbedder(BaseEmbedder):
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> np.ndarray:
         """
-        Embed texts using OpenAI API.
+        Embed texts using OpenAI API with dynamic batching.
         
         Args:
             texts: List of text strings to embed
@@ -87,33 +91,70 @@ class OpenAIEmbedder(BaseEmbedder):
         if not texts:
             return np.array([]).reshape(0, self.dimension)
         
-        all_embeddings = []
-        n_batches = (len(texts) + self.batch_size - 1) // self.batch_size
+        # Clean all texts first
+        cleaned_texts = [self._clean_text(t) for t in texts]
         
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
-            batch_num = i // self.batch_size + 1
-            
+        # Create dynamic batches based on estimated token count
+        batches = self._create_token_aware_batches(cleaned_texts)
+        n_batches = len(batches)
+        
+        all_embeddings = []
+        
+        for batch_num, batch in enumerate(batches, 1):
             if show_progress and n_batches > 1:
-                print(f"Embedding batch {batch_num}/{n_batches}...")
+                print(f"Embedding batch {batch_num}/{n_batches} ({len(batch)} texts)...")
             
             if progress_callback:
                 progress_callback(batch_num, n_batches)
             
-            # Clean texts (remove empty strings, limit length)
-            cleaned_batch = [self._clean_text(t) for t in batch]
-            
             # Call API with retry logic
-            embeddings = self._embed_batch_with_retry(cleaned_batch)
+            embeddings = self._embed_batch_with_retry(batch)
             all_embeddings.extend(embeddings)
             
             # Small delay between batches to avoid rate limits
-            if i + self.batch_size < len(texts):
+            if batch_num < n_batches:
                 time.sleep(0.1)
         
         # Stack and normalize
         embeddings_array = np.array(all_embeddings, dtype=np.float32)
         return self.normalize(embeddings_array)
+    
+    def _create_token_aware_batches(self, texts: list[str]) -> list[list[str]]:
+        """
+        Create batches that respect both text count and token limits.
+        
+        Args:
+            texts: List of cleaned texts
+            
+        Returns:
+            List of batches, each batch is a list of texts
+        """
+        batches = []
+        current_batch = []
+        current_tokens = 0
+        
+        for text in texts:
+            # Estimate tokens for this text
+            estimated_tokens = len(text) / self.CHARS_PER_TOKEN_ESTIMATE
+            
+            # Check if adding this text would exceed limits
+            would_exceed_tokens = (current_tokens + estimated_tokens) > self.MAX_TOKENS_PER_REQUEST
+            would_exceed_count = len(current_batch) >= self.batch_size
+            
+            if current_batch and (would_exceed_tokens or would_exceed_count):
+                # Start a new batch
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+            
+            current_batch.append(text)
+            current_tokens += estimated_tokens
+        
+        # Don't forget the last batch
+        if current_batch:
+            batches.append(current_batch)
+        
+        return batches
     
     def embed_single(self, text: str) -> np.ndarray:
         """

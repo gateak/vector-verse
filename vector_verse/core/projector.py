@@ -1,8 +1,9 @@
 """
 UMAP projection for dimensionality reduction.
-Handles fitting and transforming embeddings to 2D space.
+Handles fitting and transforming embeddings to 2D/3D space.
 """
 
+import warnings
 from typing import Optional, Any
 
 import numpy as np
@@ -49,17 +50,17 @@ class UMAPProjector:
     
     def fit(self, embeddings: np.ndarray, show_progress: bool = True) -> np.ndarray:
         """
-        Fit UMAP on embeddings and return 2D coordinates.
+        Fit UMAP on embeddings and return projected coordinates.
         
         Args:
             embeddings: Array of shape (n, embedding_dim)
             show_progress: Whether to print progress
             
         Returns:
-            Array of shape (n, 2) with 2D coordinates
+            Array of shape (n, n_components) with projected coordinates
         """
         if show_progress:
-            print(f"Fitting UMAP on {len(embeddings)} embeddings...")
+            print(f"Fitting UMAP ({self.n_components}D) on {len(embeddings)} embeddings...")
         
         self._model = umap.UMAP(
             n_neighbors=self.n_neighbors,
@@ -70,7 +71,10 @@ class UMAPProjector:
             verbose=show_progress
         )
         
-        coords = self._model.fit_transform(embeddings)
+        # Suppress spectral initialization warnings (common with large datasets)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*Spectral initialisation failed.*")
+            coords = self._model.fit_transform(embeddings)
         
         if show_progress:
             print("UMAP fitting complete.")

@@ -82,25 +82,41 @@ class ScatterPlotBuilder:
         color_type: str = "categorical",
         enable_lasso: bool = True,
         top_n_categories: int = 10,
+        mode_3d: bool = False,
     ) -> go.Figure:
         """
         Build an interactive scatter plot.
         
         Args:
             df: DataFrame with item metadata (must have 'id', 'title', 'author', 'source')
-            coords: Array of shape (n, 2) with UMAP coordinates
+            coords: Array of shape (n, 2) or (n, 3) with UMAP coordinates
             selected_id: ID of currently selected item (optional)
             neighbor_ids: List of neighbor IDs to highlight (optional)
-            query_coords: 2D coordinates of search query (optional)
+            query_coords: 2D/3D coordinates of search query (optional)
             query_text: Text of search query for tooltip (optional)
             color_by: Column name to color by (e.g., 'genre', 'user', 'hashtag')
             color_type: 'categorical' or 'sequential'
             enable_lasso: Enable lasso selection tool
             top_n_categories: For categorical coloring, group smaller categories as "Other"
+            mode_3d: If True, build a 3D scatter plot
             
         Returns:
             Plotly Figure object
         """
+        # Route to 3D builder if requested
+        if mode_3d:
+            return self._build_3d(
+                df=df,
+                coords=coords,
+                selected_id=selected_id,
+                neighbor_ids=neighbor_ids,
+                query_coords=query_coords,
+                query_text=query_text,
+                color_by=color_by,
+                color_type=color_type,
+                top_n_categories=top_n_categories,
+            )
+        
         # Ensure we have coordinate columns
         df = df.copy()
         df["x"] = coords[:, 0]
@@ -412,6 +428,312 @@ class ScatterPlotBuilder:
                 name="Unknown",
                 customdata=nan_df["id"].values
             ))
+        
+        return fig
+    
+    def _build_3d(
+        self,
+        df: pd.DataFrame,
+        coords: np.ndarray,
+        selected_id: Optional[str] = None,
+        neighbor_ids: Optional[list[str]] = None,
+        query_coords: Optional[np.ndarray] = None,
+        query_text: Optional[str] = None,
+        color_by: Optional[str] = None,
+        color_type: str = "categorical",
+        top_n_categories: int = 10,
+    ) -> go.Figure:
+        """Build a 3D scatter plot."""
+        # Ensure we have coordinate columns
+        df = df.copy()
+        df["x"] = coords[:, 0]
+        df["y"] = coords[:, 1]
+        df["z"] = coords[:, 2]
+        
+        # Track which items to exclude from base layer
+        special_ids = set()
+        if selected_id:
+            special_ids.add(selected_id)
+        if neighbor_ids:
+            special_ids.update(neighbor_ids)
+        
+        # Determine coloring strategy
+        if color_by and color_by in df.columns:
+            fig = self._build_3d_colored_by_field(
+                df, special_ids, color_by, color_type, top_n_categories
+            )
+        else:
+            fig = self._build_3d_by_source(df, special_ids)
+        
+        # Add neighbor highlights
+        if neighbor_ids:
+            neighbor_df = df[df["id"].isin(neighbor_ids)]
+            if not neighbor_df.empty:
+                fig.add_trace(go.Scatter3d(
+                    x=neighbor_df["x"],
+                    y=neighbor_df["y"],
+                    z=neighbor_df["z"],
+                    mode="markers",
+                    marker=dict(
+                        color=self.COLORS["neighbor"],
+                        size=8,
+                        opacity=0.9,
+                        line=dict(color="white", width=1),
+                    ),
+                    text=self._build_hover_text(neighbor_df),
+                    hovertemplate="%{text}<extra></extra>",
+                    name="Similar",
+                    customdata=neighbor_df["id"].values
+                ))
+        
+        # Add selected item highlight
+        if selected_id:
+            selected_df = df[df["id"] == selected_id]
+            if not selected_df.empty:
+                fig.add_trace(go.Scatter3d(
+                    x=selected_df["x"],
+                    y=selected_df["y"],
+                    z=selected_df["z"],
+                    mode="markers",
+                    marker=dict(
+                        color=self.COLORS["selected"],
+                        size=12,
+                        opacity=1.0,
+                        line=dict(color="white", width=2),
+                    ),
+                    text=self._build_hover_text(selected_df),
+                    hovertemplate="%{text}<extra></extra>",
+                    name="Selected",
+                    customdata=selected_df["id"].values
+                ))
+        
+        # Add query point
+        if query_coords is not None and len(query_coords) >= 3:
+            query_text_display = (query_text[:100] + "...") if query_text and len(query_text) > 100 else query_text
+            fig.add_trace(go.Scatter3d(
+                x=[query_coords[0]],
+                y=[query_coords[1]],
+                z=[query_coords[2]],
+                mode="markers",
+                marker=dict(
+                    color=self.COLORS["query"],
+                    size=14,
+                    opacity=1.0,
+                    symbol="diamond",
+                    line=dict(color="white", width=2),
+                ),
+                text=[f"<b>Search Query</b><br>{query_text_display}" if query_text else "Search Query"],
+                hovertemplate="%{text}<extra></extra>",
+                name="Query"
+            ))
+        
+        # Configure 3D layout
+        fig.update_layout(
+            height=self.height + 100,  # Slightly taller for 3D
+            width=self.width,
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            scene=dict(
+                bgcolor="rgba(17,17,17,0.8)",
+                xaxis=dict(
+                    showgrid=True,
+                    gridcolor="rgba(102, 126, 234, 0.2)",
+                    showticklabels=False,
+                    title="",
+                    zeroline=False,
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="rgba(102, 126, 234, 0.2)",
+                    showticklabels=False,
+                    title="",
+                    zeroline=False,
+                ),
+                zaxis=dict(
+                    showgrid=True,
+                    gridcolor="rgba(102, 126, 234, 0.2)",
+                    showticklabels=False,
+                    title="",
+                    zeroline=False,
+                ),
+            ),
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01,
+                bgcolor="rgba(0,0,0,0.5)",
+                font=dict(size=10)
+            ),
+            margin=dict(l=0, r=0, t=30, b=0),
+        )
+        
+        return fig
+    
+    def _build_3d_by_source(
+        self,
+        df: pd.DataFrame,
+        special_ids: set
+    ) -> go.Figure:
+        """Build 3D plot colored by source type."""
+        fig = go.Figure()
+        
+        for source in df["source"].unique():
+            source_df = df[(df["source"] == source) & (~df["id"].isin(special_ids))]
+            
+            if source_df.empty:
+                continue
+            
+            color = self.COLORS.get(source, self.COLORS["default"])
+            marker_settings = self.MARKERS.get(source, self.MARKERS.get("poetry"))
+            
+            fig.add_trace(go.Scatter3d(
+                x=source_df["x"],
+                y=source_df["y"],
+                z=source_df["z"],
+                mode="markers",
+                marker=dict(
+                    color=color,
+                    size=marker_settings.get("size", 5),
+                    opacity=marker_settings.get("opacity", 0.6),
+                ),
+                text=self._build_hover_text(source_df),
+                hovertemplate="%{text}<extra></extra>",
+                name=source.title(),
+                customdata=source_df["id"].values
+            ))
+        
+        return fig
+    
+    def _build_3d_colored_by_field(
+        self,
+        df: pd.DataFrame,
+        special_ids: set,
+        color_by: str,
+        color_type: str,
+        top_n: int
+    ) -> go.Figure:
+        """Build 3D plot colored by a metadata field."""
+        fig = go.Figure()
+        
+        # Filter out special items
+        plot_df = df[~df["id"].isin(special_ids)].copy()
+        
+        if plot_df.empty:
+            return fig
+        
+        # Get marker settings from first source
+        first_source = plot_df["source"].iloc[0] if "source" in plot_df.columns else "poetry"
+        marker_settings = self.MARKERS.get(first_source, self.MARKERS.get("poetry"))
+        
+        if color_type == "categorical":
+            # Handle list columns
+            if plot_df[color_by].apply(lambda x: isinstance(x, list)).any():
+                plot_df = plot_df.copy()
+                plot_df[color_by] = plot_df[color_by].apply(
+                    lambda x: x[0] if isinstance(x, list) and len(x) > 0 else (x if not isinstance(x, list) else None)
+                )
+            
+            # Get value counts and identify top N
+            value_counts = plot_df[color_by].value_counts()
+            top_values = set(value_counts.head(top_n).index)
+            
+            # Create "Other" category
+            plot_df = plot_df.copy()
+            plot_df["_color_group"] = plot_df[color_by].apply(
+                lambda x: x if x in top_values else "Other" if pd.notna(x) else "Unknown"
+            )
+            
+            # Sort categories
+            categories = (
+                [v for v in value_counts.index if v in top_values] +
+                (["Other"] if (plot_df["_color_group"] == "Other").any() else []) +
+                (["Unknown"] if (plot_df["_color_group"] == "Unknown").any() else [])
+            )
+            
+            # Add trace for each category
+            for i, category in enumerate(categories):
+                cat_df = plot_df[plot_df["_color_group"] == category]
+                
+                if cat_df.empty:
+                    continue
+                
+                if category == "Other":
+                    color = "#6b7280"
+                elif category == "Unknown":
+                    color = "#4b5563"
+                else:
+                    color = self.CATEGORICAL_COLORS[i % len(self.CATEGORICAL_COLORS)]
+                
+                legend_label = str(category)[:20] + ("..." if len(str(category)) > 20 else "")
+                
+                fig.add_trace(go.Scatter3d(
+                    x=cat_df["x"],
+                    y=cat_df["y"],
+                    z=cat_df["z"],
+                    mode="markers",
+                    marker=dict(
+                        color=color,
+                        size=marker_settings.get("size", 5),
+                        opacity=marker_settings.get("opacity", 0.6),
+                    ),
+                    text=self._build_hover_text(cat_df, extra_field=color_by),
+                    hovertemplate="%{text}<extra></extra>",
+                    name=legend_label,
+                    customdata=cat_df["id"].values,
+                    legendgroup=category,
+                ))
+        else:
+            # Sequential coloring
+            color_values = pd.to_numeric(plot_df[color_by], errors="coerce")
+            has_values = ~color_values.isna()
+            
+            if has_values.any():
+                valid_df = plot_df[has_values]
+                valid_values = color_values[has_values]
+                
+                fig.add_trace(go.Scatter3d(
+                    x=valid_df["x"],
+                    y=valid_df["y"],
+                    z=valid_df["z"],
+                    mode="markers",
+                    marker=dict(
+                        color=valid_values,
+                        colorscale="Viridis",
+                        showscale=True,
+                        colorbar=dict(
+                            title=color_by.title(),
+                            thickness=15,
+                            len=0.5,
+                        ),
+                        size=marker_settings.get("size", 5),
+                        opacity=marker_settings.get("opacity", 0.6),
+                    ),
+                    text=self._build_hover_text(valid_df, extra_field=color_by),
+                    hovertemplate="%{text}<extra></extra>",
+                    name=color_by.title(),
+                    customdata=valid_df["id"].values
+                ))
+            
+            # Add NaN values
+            if (~has_values).any():
+                nan_df = plot_df[~has_values]
+                fig.add_trace(go.Scatter3d(
+                    x=nan_df["x"],
+                    y=nan_df["y"],
+                    z=nan_df["z"],
+                    mode="markers",
+                    marker=dict(
+                        color="#4b5563",
+                        size=marker_settings.get("size", 5),
+                        opacity=marker_settings.get("opacity", 0.6),
+                    ),
+                    text=self._build_hover_text(nan_df),
+                    hovertemplate="%{text}<extra></extra>",
+                    name="Unknown",
+                    customdata=nan_df["id"].values
+                ))
         
         return fig
     

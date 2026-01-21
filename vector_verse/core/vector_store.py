@@ -54,8 +54,10 @@ class VectorStore:
         # Will be populated after initialization
         self.items_df: Optional[pd.DataFrame] = None
         self.embeddings: Optional[np.ndarray] = None
-        self.umap_coords: Optional[np.ndarray] = None
+        self.umap_coords: Optional[np.ndarray] = None  # 2D coords
+        self.umap_coords_3d: Optional[np.ndarray] = None  # 3D coords
         self.projector: Optional[UMAPProjector] = None
+        self.projector_3d: Optional[UMAPProjector] = None
         
         # Cache manager (set during initialize)
         self._cache: Optional[CacheManager] = None
@@ -127,11 +129,17 @@ class VectorStore:
         # Load items
         self.items_df = self._cache.load_items()
         
-        # Load UMAP
+        # Load 2D UMAP
         self.projector = UMAPProjector()
         if self._cache.has_umap():
             self.umap_coords = self._cache.load_umap_coords()
             self.projector.set_model(self._cache.load_umap_model())
+        
+        # Load 3D UMAP if available
+        self.projector_3d = UMAPProjector(n_components=3)
+        if self._cache.has_umap_3d():
+            self.umap_coords_3d = self._cache.load_umap_coords_3d()
+            self.projector_3d.set_model(self._cache.load_umap_model_3d())
     
     def _build_from_scratch(self, log: Callable[[str], None]) -> None:
         """Compute embeddings and UMAP from scratch."""
@@ -185,7 +193,7 @@ class VectorStore:
         self,
         texts: list[str],
         log: Callable[[str], None],
-        checkpoint_every: int = 20
+        checkpoint_every: int = 5
     ) -> np.ndarray:
         """
         Embed texts with periodic checkpoints to allow resuming.
@@ -252,6 +260,55 @@ class VectorStore:
         self._id_to_idx = {
             id_: idx for idx, id_ in enumerate(self.items_df["id"])
         }
+    
+    def ensure_3d_umap(self, progress_callback: Optional[Callable[[str], None]] = None) -> np.ndarray:
+        """
+        Ensure 3D UMAP coords exist, computing if necessary.
+        
+        Args:
+            progress_callback: Optional callable for progress updates
+            
+        Returns:
+            3D UMAP coordinates array of shape (n, 3)
+        """
+        if self.umap_coords_3d is not None:
+            return self.umap_coords_3d
+        
+        def log(msg: str):
+            if progress_callback:
+                progress_callback(msg)
+            print(msg)
+        
+        # Check cache first
+        if self._cache.has_umap_3d():
+            log("Loading 3D UMAP from cache...")
+            self.umap_coords_3d = self._cache.load_umap_coords_3d()
+            self.projector_3d = UMAPProjector(n_components=3)
+            self.projector_3d.set_model(self._cache.load_umap_model_3d())
+            return self.umap_coords_3d
+        
+        # Compute 3D UMAP
+        log("Computing 3D UMAP projection (this may take a minute)...")
+        self.projector_3d = UMAPProjector(n_components=3)
+        self.umap_coords_3d = self.projector_3d.fit(self.embeddings, show_progress=False)
+        
+        # Save to cache
+        log("Saving 3D UMAP to cache...")
+        self._cache.save_umap_3d(self.umap_coords_3d, self.projector_3d.get_model())
+        
+        # If we have custom items, we need to project them too
+        n_custom = self.n_custom_items
+        if n_custom > 0:
+            # Re-project custom items (they were already added to embeddings)
+            # The 3D coords already include them from the fit above
+            pass
+        
+        return self.umap_coords_3d
+    
+    @property
+    def has_3d_umap(self) -> bool:
+        """Check if 3D UMAP coords are available (loaded or computed)."""
+        return self.umap_coords_3d is not None or self._cache.has_umap_3d()
     
     # -------------------------------------------------------------------------
     # Search and retrieval

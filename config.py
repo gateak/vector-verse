@@ -20,7 +20,7 @@ LYRICS_DATA_DIR = DATA_DIR / "lyrics"
 DEFAULT_EMBEDDER = "openai"
 OPENAI_MODEL = "text-embedding-3-small"
 OPENAI_EMBEDDING_DIM = 1536
-OPENAI_BATCH_SIZE = 50  # Texts per API call (reduced to avoid rate limits)
+OPENAI_BATCH_SIZE = 2000  # Max texts per API call (actual batch size adapts to token limits)
 
 # UMAP settings
 UMAP_N_NEIGHBORS = 15
