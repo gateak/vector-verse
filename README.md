@@ -4,16 +4,19 @@
 
 Vector-Verse is a Python web application that lets you explore and visualize text datasets through the lens of semantic similarity. It embeds your text corpus using OpenAI's embedding models and projects them into an interactive 2D scatter plot using UMAP.
 
-## Features
+## ✨ Features
 
+- **Multi-Dataset Support**: Poetry, Tweets, Song Lyrics, and custom datasets
 - **Semantic Search**: Find similar texts by meaning, not just keywords
+- **Hierarchical Zoom**: Lasso-select clusters and re-run UMAP for finer detail
 - **Interactive Visualization**: Explore your corpus as a 2D scatter plot
-- **Multilingual Support**: Works with any language (Turkish, English, etc.)
+- **Color Dimensions**: Visualize by genre, author, hashtag, user, decade, etc.
+- **Multilingual Support**: Works with any language
 - **Custom Items**: Add your own texts and see how they relate to the corpus
 - **Fast Caching**: First run builds embeddings, subsequent runs load instantly
-- **Extensible Architecture**: Easy to add new datasets or embedding backends
+- **In-App Documentation**: Methodology and Architecture tabs explain how it works
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Clone and Install
 
@@ -29,28 +32,28 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 
 ```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your OpenAI API key:
-
-```
 OPENAI_API_KEY=sk-your-api-key-here
 ```
 
 Get your API key at: https://platform.openai.com/api-keys
 
-### 3. Download the Poetry Dataset
+### 3. Add a Dataset
 
-1. Go to: https://www.kaggle.com/datasets/tgdivy/poetry-foundation-poems
-2. Download the dataset (you'll need a Kaggle account)
-3. Extract `PoetryFoundationData.csv` to the `data/` folder:
+Choose at least one dataset:
 
-```
-vector-verse/
-└── data/
-    └── PoetryFoundationData.csv
-```
+#### Poetry (Default)
+1. Download from: https://www.kaggle.com/datasets/tgdivy/poetry-foundation-poems
+2. Place `PoetryFoundationData.csv` in `data/`
+
+#### Tweets
+1. Download from: https://www.kaggle.com/datasets/khalidryder777/500k-chatgpt-tweets-jan-mar-2023
+2. Create `data/tweets/` folder
+3. Place the CSV inside
+
+#### Lyrics
+1. Download from: https://www.kaggle.com/datasets/neisse/scrapped-lyrics-from-6-genres
+2. Create `data/lyrics/` folder
+3. Place `lyrics-data.csv` (and optionally `artists-data.csv`) inside
 
 ### 4. Run the App
 
@@ -60,17 +63,26 @@ streamlit run app.py
 
 The app will open in your browser at `http://localhost:8501`
 
-## First Run
+## 📊 Datasets
 
-On first run, the app will:
-1. Load the poetry dataset (~14k poems)
-2. Generate embeddings via OpenAI API (~5-10 minutes, ~$0.50-1.00)
-3. Compute UMAP projection
-4. Save everything to cache
+### Poetry Foundation (~14k poems)
+- Source: [Kaggle](https://www.kaggle.com/datasets/tgdivy/poetry-foundation-poems)
+- Color by: author, source
+- Good for: exploring poetic themes, finding similar writing styles
 
-Subsequent runs load from cache in seconds.
+### Tweets (up to 500k)
+- Sources: 
+  - [ChatGPT Tweets](https://www.kaggle.com/datasets/khalidryder777/500k-chatgpt-tweets-jan-mar-2023)
+  - [Twitter Data](https://www.kaggle.com/datasets/smmmmmmmmmmmm/twitter-data)
+- Color by: user, hashtag, date, sentiment label
+- Good for: topic clustering, hashtag analysis, sentiment exploration
 
-## Usage
+### Song Lyrics
+- Source: [Scrapped Lyrics from 6 Genres](https://www.kaggle.com/datasets/neisse/scrapped-lyrics-from-6-genres)
+- Color by: genre, artist, decade, language
+- Good for: genre analysis, artist similarity, lyrical theme exploration
+
+## 🔍 Usage
 
 ### Browse
 Select an item from the sidebar dropdown to see its full text and similar items.
@@ -78,138 +90,173 @@ Select an item from the sidebar dropdown to see its full text and similar items.
 ### Search
 Enter any text in the search box to find semantically similar items. Your query will be projected onto the visualization as a red star.
 
-### Visualize
-The scatter plot shows all items in 2D space:
-- **Blue circles**: Poetry dataset items
-- **Orange diamonds**: Your custom items
-- **Green highlight**: Selected item
-- **Purple highlights**: Similar items
-- **Red star**: Search query
+### Zoom
+1. Use the **lasso tool** (default) to draw around a cluster of points
+2. Click **"Zoom Into Selection"** to re-run UMAP on just those items
+3. Navigate with **Back** and **Reset** buttons
+4. Zoom reveals finer structure that's hidden at the global scale
 
-## Adding Custom Items
+### Color By
+Use the sidebar "Color By" selector to visualize by different dimensions:
+- **Genre** (lyrics): See how genres cluster
+- **Artist** (lyrics): Compare artists' styles
+- **User** (tweets): See which users cluster together
+- **Hashtag** (tweets): Visualize topic communities
+- **Decade** (lyrics): Explore how music evolved
 
-Edit `data/custom_items.csv` to add your own texts:
-
-```csv
-title,author,text,language
-"My Poem","Your Name","Your poem text here...","en"
-"Şiirim","Adınız","Türkçe şiir metni...","tr"
-```
-
-Custom items:
-- Are always included (never sampled away)
-- Appear as orange diamonds in the visualization
-- Work with any language
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 vector-verse/
 ├── app.py                      # Streamlit application
 ├── config.py                   # Configuration settings
 ├── requirements.txt            # Python dependencies
-├── .env.example               # API key template
 ├── vector_verse/
-│   ├── loaders/               # Dataset loaders (plugin pattern)
-│   │   ├── base.py            # BaseDatasetLoader ABC
-│   │   ├── poetry.py          # Poetry Foundation loader
-│   │   └── custom.py          # Custom items loader
-│   ├── embedders/             # Embedding backends (strategy pattern)
-│   │   ├── base.py            # BaseEmbedder ABC
-│   │   └── openai_embedder.py # OpenAI implementation
+│   ├── loaders/                # Dataset loaders (plugin pattern)
+│   │   ├── base.py             # BaseDatasetLoader ABC
+│   │   ├── poetry.py           # Poetry Foundation loader
+│   │   ├── tweets.py           # Tweets CSV loader (NEW)
+│   │   ├── lyrics.py           # Lyrics CSV loader (NEW)
+│   │   └── custom.py           # Custom items loader
+│   ├── embedders/              # Embedding backends
+│   │   ├── base.py             # BaseEmbedder ABC
+│   │   └── openai_embedder.py  # OpenAI implementation
 │   ├── core/
-│   │   ├── vector_store.py    # Main orchestrator
-│   │   └── projector.py       # UMAP projection
+│   │   ├── vector_store.py     # Main orchestrator
+│   │   ├── projector.py        # UMAP projection
+│   │   └── zoom_manager.py     # Hierarchical zoom (NEW)
 │   ├── cache/
-│   │   └── manager.py         # Cache persistence
+│   │   └── manager.py          # Cache persistence
 │   └── visualization/
-│       └── scatter.py         # Plotly scatter builder
+│       └── scatter.py          # Plotly scatter builder
 ├── data/
-│   ├── PoetryFoundationData.csv  # Download from Kaggle
-│   └── custom_items.csv          # Your custom items
-└── cache/                         # Auto-generated cache
+│   ├── PoetryFoundationData.csv
+│   ├── custom_items.csv
+│   ├── tweets/                 # Tweet CSVs go here
+│   │   └── README.md
+│   └── lyrics/                 # Lyrics CSVs go here
+│       └── README.md
+└── cache/                      # Auto-generated cache
+    ├── poetry_foundation_openai_text-embedding-3-small/
+    ├── tweets_openai_text-embedding-3-small/
+    └── lyrics_openai_text-embedding-3-small/
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 Edit `config.py` to customize:
 
-- **Embedding model**: Change `OPENAI_MODEL` (default: text-embedding-3-small)
-- **UMAP parameters**: Adjust `UMAP_N_NEIGHBORS`, `UMAP_MIN_DIST`, etc.
-- **Search results**: Change `DEFAULT_K_NEIGHBORS`
+```python
+# Embedding model
+OPENAI_MODEL = "text-embedding-3-small"
 
-## Extending Vector-Verse
+# UMAP parameters
+UMAP_N_NEIGHBORS = 15
+UMAP_MIN_DIST = 0.1
 
-### Adding a New Dataset
+# Search results
+DEFAULT_K_NEIGHBORS = 10
+```
 
-1. Create a new loader in `vector_verse/loaders/`:
+## 🔌 Extending Vector-Verse
+
+### Adding a New Dataset Loader
+
+1. Create `vector_verse/loaders/your_loader.py`:
 
 ```python
 from .base import BaseDatasetLoader, register_loader
 
-@register_loader("my_dataset")
-class MyDatasetLoader(BaseDatasetLoader):
+@register_loader("your_dataset")
+class YourLoader(BaseDatasetLoader):
     @property
     def name(self) -> str:
-        return "my_dataset"
+        return "your_dataset"
     
     def load(self) -> pd.DataFrame:
         # Return DataFrame with: id, title, author, text, source
-        ...
+        # Plus any metadata columns for color dimensions
+        df = pd.read_csv(...)
+        return self.validate(df)
+    
+    def get_color_dimensions(self) -> dict[str, str]:
+        return {
+            "category": "categorical",
+            "year": "sequential",
+        }
 ```
 
-2. Update `VectorStore` instantiation in `app.py`
-
-### Adding a New Embedding Backend
-
-1. Create a new embedder in `vector_verse/embedders/`:
+2. Add to `config.py`:
 
 ```python
-from .base import BaseEmbedder, register_embedder
-
-@register_embedder("my_embedder")
-class MyEmbedder(BaseEmbedder):
-    @property
-    def name(self) -> str:
-        return "my_embedder"
-    
-    @property
-    def dimension(self) -> int:
-        return 768  # Your embedding dimension
-    
-    def embed(self, texts: list[str]) -> np.ndarray:
-        # Return normalized embeddings
-        ...
+AVAILABLE_DATASETS["your_dataset"] = {
+    "loader": "your_dataset",
+    "label": "🏷️ Your Dataset",
+    "data_check": lambda: (DATA_DIR / "your_data.csv").exists(),
+    "color_dimensions": ["category", "year"],
+}
 ```
 
-2. Update `VectorStore` instantiation in `app.py`
+3. Export in `vector_verse/loaders/__init__.py`:
 
-## Costs
+```python
+from .your_loader import YourLoader
+```
+
+### Dataset Manifest (Optional)
+
+For explicit column mapping, create `dataset.yaml` in the data folder:
+
+```yaml
+source: kaggle
+kaggle_slug: username/dataset-name
+file: data.csv
+column_map:
+  text: content
+  user: author
+  date: timestamp
+```
+
+## 💰 Costs
 
 Using OpenAI's text-embedding-3-small:
 - ~14k poems: $0.50-1.00 (one-time, cached)
+- ~500k tweets: ~$5-10 (one-time, cached)
 - Each search query: ~$0.0001
 
-## Troubleshooting
+## 🐛 Troubleshooting
 
-### "Poetry dataset not found"
-Download the CSV from Kaggle and place it in `data/PoetryFoundationData.csv`
+### "No datasets found"
+Add at least one dataset to the `data/` folder (see Quick Start).
 
 ### "OpenAI API key not found"
-Create a `.env` file with your API key (see setup instructions)
+Create a `.env` file with your API key.
 
 ### "Rate limit exceeded"
 The app has automatic retry logic. If it persists, wait a minute and try again.
 
-### Rebuilding Cache
-Check the "Rebuild Cache" button in the sidebar to re-embed everything.
+### Zoom feels slow
+First zoom into a region is computed fresh. Repeated zooms to the same selection are cached and instant.
 
-## License
+### Rebuilding Cache
+Use the "🔄 Rebuild Cache" button in the sidebar to re-embed everything.
+
+## 📚 In-App Documentation
+
+The app includes two documentation tabs:
+
+- **📚 Methodology**: Non-technical explanation of embeddings, UMAP, similarity search, and what clusters mean
+- **🏗️ Architecture**: Technical diagram of the data flow, caching strategy, and how to extend the system
+
+## 📄 License
 
 MIT License - feel free to use this for your own projects!
 
-## Credits
+## 🙏 Credits
 
 - Poetry dataset: [Kaggle Poetry Foundation Poems](https://www.kaggle.com/datasets/tgdivy/poetry-foundation-poems)
+- Tweets dataset: [Kaggle ChatGPT Tweets](https://www.kaggle.com/datasets/khalidryder777/500k-chatgpt-tweets-jan-mar-2023)
+- Lyrics dataset: [Kaggle Scrapped Lyrics](https://www.kaggle.com/datasets/neisse/scrapped-lyrics-from-6-genres)
 - Embeddings: [OpenAI](https://platform.openai.com/)
 - Visualization: [UMAP](https://umap-learn.readthedocs.io/) + [Plotly](https://plotly.com/)
+- UI Framework: [Streamlit](https://streamlit.io/)

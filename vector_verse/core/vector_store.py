@@ -4,12 +4,12 @@ Manages data loading, embedding, caching, and similarity search.
 """
 
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Union
 
 import numpy as np
 import pandas as pd
 
-from vector_verse.loaders.base import BaseDatasetLoader
+from vector_verse.loaders.base import BaseDatasetLoader, get_loader
 from vector_verse.loaders.poetry import PoetryLoader
 from vector_verse.loaders.custom import CustomItemsLoader
 from vector_verse.embedders.base import BaseEmbedder
@@ -260,7 +260,8 @@ class VectorStore:
     def search(
         self,
         query: str,
-        k: int = config.DEFAULT_K_NEIGHBORS
+        k: int = config.DEFAULT_K_NEIGHBORS,
+        index_mask: Optional[np.ndarray] = None
     ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
         """
         Search for similar items given a text query.
@@ -268,6 +269,7 @@ class VectorStore:
         Args:
             query: Search text (any language)
             k: Number of results to return
+            index_mask: Optional array of indices to scope search to (for zoom)
             
         Returns:
             Tuple of:
@@ -278,15 +280,28 @@ class VectorStore:
         # Embed query
         query_embedding = self.embedder.embed_single(query)
         
-        # Compute similarities (dot product since vectors are normalized)
-        similarities = self.embeddings @ query_embedding
+        # Determine which embeddings to search
+        if index_mask is not None:
+            search_embeddings = self.embeddings[index_mask]
+            search_df = self.items_df.iloc[index_mask]
+        else:
+            search_embeddings = self.embeddings
+            search_df = self.items_df
         
-        # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:k]
+        # Compute similarities (dot product since vectors are normalized)
+        similarities = search_embeddings @ query_embedding
+        
+        # Get top-k indices (within the search scope)
+        k_actual = min(k, len(similarities))
+        top_local_indices = np.argsort(similarities)[::-1][:k_actual]
         
         # Build results DataFrame
-        results = self.items_df.iloc[top_indices].copy()
-        results["similarity"] = similarities[top_indices]
+        results = search_df.iloc[top_local_indices].copy()
+        results["similarity"] = similarities[top_local_indices]
+        
+        # Map back to full dataset indices if needed
+        if index_mask is not None:
+            results["_full_index"] = index_mask[top_local_indices]
         
         # Project query to UMAP space
         query_coords = self.projector.transform_single(query_embedding)
@@ -296,7 +311,8 @@ class VectorStore:
     def get_neighbors(
         self,
         item_id: str,
-        k: int = config.DEFAULT_K_NEIGHBORS
+        k: int = config.DEFAULT_K_NEIGHBORS,
+        index_mask: Optional[np.ndarray] = None
     ) -> pd.DataFrame:
         """
         Get nearest neighbors for a given item.
@@ -304,6 +320,7 @@ class VectorStore:
         Args:
             item_id: ID of the item
             k: Number of neighbors to return (excluding the item itself)
+            index_mask: Optional array of indices to scope search to (for zoom)
             
         Returns:
             DataFrame of k nearest neighbors with similarity scores
@@ -314,18 +331,40 @@ class VectorStore:
         idx = self._id_to_idx[item_id]
         item_embedding = self.embeddings[idx]
         
-        # Compute similarities
-        similarities = self.embeddings @ item_embedding
+        # Determine which embeddings to search
+        if index_mask is not None:
+            search_embeddings = self.embeddings[index_mask]
+            search_df = self.items_df.iloc[index_mask]
+            # Find the item's position in the masked view
+            try:
+                local_idx = np.where(index_mask == idx)[0][0]
+            except IndexError:
+                local_idx = -1  # Item not in current scope
+        else:
+            search_embeddings = self.embeddings
+            search_df = self.items_df
+            local_idx = idx
         
-        # Get top k+1 (to exclude self)
-        top_indices = np.argsort(similarities)[::-1][:k+1]
+        # Compute similarities
+        similarities = search_embeddings @ item_embedding
+        
+        # Get top k+1 (to exclude self if present)
+        k_fetch = min(k + 1, len(similarities))
+        top_local_indices = np.argsort(similarities)[::-1][:k_fetch]
         
         # Filter out self
-        top_indices = [i for i in top_indices if i != idx][:k]
+        if local_idx >= 0:
+            top_local_indices = [i for i in top_local_indices if i != local_idx][:k]
+        else:
+            top_local_indices = top_local_indices[:k]
         
         # Build results DataFrame
-        results = self.items_df.iloc[top_indices].copy()
-        results["similarity"] = similarities[top_indices]
+        results = search_df.iloc[top_local_indices].copy()
+        results["similarity"] = similarities[top_local_indices]
+        
+        # Map back to full dataset indices if needed
+        if index_mask is not None:
+            results["_full_index"] = index_mask[top_local_indices]
         
         return results
     

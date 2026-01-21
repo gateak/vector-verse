@@ -18,14 +18,39 @@ ENV/
 .env
 .env.local
 
-# Cache
+# Cache (embeddings, UMAP models, zoom projections)
 cache/
 !cache/.gitkeep
 
 # Data (large files)
 data/*.csv
+data/**/*.csv
 !data/custom_items.csv
 !data/.gitkeep
+
+# Keep README files in data subdirs
+!data/tweets/README.md
+!data/lyrics/README.md
+
+# Archives
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# Large binary files
+*.npz
+*.pkl
+*.parquet
+*.npy
+*.h5
+*.hdf5
+
+# Model files
+*.bin
+*.pt
+*.pth
+*.onnx
 
 # Jupyter
 .ipynb_checkpoints/

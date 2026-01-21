@@ -2,8 +2,19 @@
 Dataset loaders for Vector-Verse.
 """
 
-from .base import BaseDatasetLoader
+from .base import BaseDatasetLoader, get_loader, list_loaders, register_loader
 from .poetry import PoetryLoader
 from .custom import CustomItemsLoader
+from .tweets import TweetsCsvLoader
+from .lyrics import LyricsCsvLoader
 
-__all__ = ["BaseDatasetLoader", "PoetryLoader", "CustomItemsLoader"]
+__all__ = [
+    "BaseDatasetLoader",
+    "get_loader",
+    "list_loaders",
+    "register_loader",
+    "PoetryLoader",
+    "CustomItemsLoader",
+    "TweetsCsvLoader",
+    "LyricsCsvLoader",
+]

@@ -13,6 +13,8 @@ CACHE_DIR = PROJECT_ROOT / "cache"
 # Default dataset paths
 POETRY_CSV_PATH = DATA_DIR / "PoetryFoundationData.csv"
 CUSTOM_ITEMS_PATH = DATA_DIR / "custom_items.csv"
+TWEETS_DATA_DIR = DATA_DIR / "tweets"
+LYRICS_DATA_DIR = DATA_DIR / "lyrics"
 
 # Embedding settings
 DEFAULT_EMBEDDER = "openai"
@@ -37,4 +39,36 @@ PLOT_WIDTH = 800
 # Source identifiers for different item types
 SOURCE_POETRY = "poetry"
 SOURCE_CUSTOM = "custom"
+SOURCE_TWEETS = "tweets"
+SOURCE_LYRICS = "lyrics"
 SOURCE_QUERY = "query"
+
+# Dataset registry
+AVAILABLE_DATASETS = {
+    "poetry": {
+        "loader": "poetry",
+        "label": "📜 Poetry",
+        "description": "Poetry Foundation poems (~14k)",
+        "data_check": lambda: POETRY_CSV_PATH.exists(),
+        "color_dimensions": ["author", "source"],
+    },
+    "tweets": {
+        "loader": "tweets",
+        "label": "🐦 Tweets",
+        "description": "Twitter/X posts from Kaggle datasets",
+        "data_check": lambda: TWEETS_DATA_DIR.exists() and any(TWEETS_DATA_DIR.glob("*.csv")),
+        "color_dimensions": ["user", "hashtag", "date_bucket", "label", "region", "language"],
+    },
+    "lyrics": {
+        "loader": "lyrics",
+        "label": "🎵 Lyrics",
+        "description": "Song lyrics from various genres",
+        "data_check": lambda: LYRICS_DATA_DIR.exists() and (
+            any(LYRICS_DATA_DIR.glob("*.csv")) or 
+            (LYRICS_DATA_DIR / "lyrics-data.csv").exists()
+        ),
+        "color_dimensions": ["genre", "artist", "decade", "language"],
+    },
+}
+
+DEFAULT_DATASET = "poetry"
