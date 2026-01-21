@@ -269,30 +269,15 @@ class TweetsCsvLoader(BaseDatasetLoader):
     def _auto_detect_columns(self, columns: list[str]) -> dict:
         """
         Auto-detect column mapping from available columns.
-        
+
         Args:
             columns: List of column names in the CSV
-            
+
         Returns:
             Mapping from normalized names to actual column names
         """
-        mapping = {}
-        columns_lower = {c.lower(): c for c in columns}
-        
-        # Try each preset
-        for preset_name, preset in self.COLUMN_PRESETS.items():
-            for target, candidates in preset.items():
-                if target in mapping:
-                    continue
-                for candidate in candidates:
-                    if candidate in columns:
-                        mapping[target] = candidate
-                        break
-                    elif candidate.lower() in columns_lower:
-                        mapping[target] = columns_lower[candidate.lower()]
-                        break
-        
-        return mapping
+        # Use shared base class method with this loader's presets
+        return super()._auto_detect_columns(columns, self.COLUMN_PRESETS)
     
     def _normalize_columns(self, df: pd.DataFrame, column_map: dict) -> pd.DataFrame:
         """
@@ -308,10 +293,7 @@ class TweetsCsvLoader(BaseDatasetLoader):
         # Auto-detect if no mapping provided
         if not column_map:
             column_map = self._auto_detect_columns(df.columns.tolist())
-        
-        # Store source metadata
-        df["source_meta"] = df.apply(lambda row: row.to_dict(), axis=1)
-        
+
         # Map columns
         normalized = pd.DataFrame()
         
@@ -358,10 +340,7 @@ class TweetsCsvLoader(BaseDatasetLoader):
         # Parse dates
         if "date" in normalized.columns:
             normalized["created_at"] = pd.to_datetime(normalized["date"], errors="coerce")
-        
-        # Keep source metadata
-        normalized["source_meta"] = df["source_meta"]
-        
+
         return normalized
     
     def _clean_tweet(self, text: str) -> str:

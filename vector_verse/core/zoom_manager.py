@@ -24,19 +24,31 @@ class ZoomLevel:
     umap_coords: np.ndarray          # Re-computed 2D coords for this subset
     label: str                       # Human-readable: "All", "Zoom 1", etc.
     depth: int = 0                   # Depth in hierarchy (0 = root)
+    _index_lookup: Optional[dict] = field(default=None, repr=False)  # Cached full->local index map
+
+    def get_index_lookup(self) -> dict:
+        """Get or create the full-to-local index lookup dictionary (cached)."""
+        if self._index_lookup is None:
+            self._index_lookup = {
+                full_idx: i for i, full_idx in enumerate(self.index_mask)
+            }
+        return self._index_lookup
 
 
 class ZoomManager:
     """
     Manages hierarchical zoom state and caches subset UMAP projections.
-    
+
     Features:
     - Zoom into lasso-selected regions
     - Re-run UMAP on subset for better local structure
     - Cache zoom projections for instant re-access
     - Breadcrumb navigation (back/reset)
     """
-    
+
+    # Minimum items required for zoom (UMAP needs at least 3)
+    MIN_ITEMS_FOR_ZOOM = 3
+
     def __init__(
         self,
         cache_manager: CacheManager,
@@ -126,19 +138,30 @@ class ZoomManager:
     ) -> ZoomLevel:
         """
         Create new zoom level from selected indices.
-        
+
         Args:
             selected_indices: Indices into CURRENT level's data (not full dataset)
             label: Human-readable label for this level
             progress_callback: Optional progress reporter
-            
+
         Returns:
             The new ZoomLevel
+
+        Raises:
+            ValueError: If fewer than MIN_ITEMS_FOR_ZOOM items are selected
         """
+        # Validate minimum selection size
+        if len(selected_indices) < self.MIN_ITEMS_FOR_ZOOM:
+            raise ValueError(
+                f"Cannot zoom into fewer than {self.MIN_ITEMS_FOR_ZOOM} items. "
+                f"Selected: {len(selected_indices)}. "
+                f"Please select more items to zoom."
+            )
+
         def log(msg: str):
             if progress_callback:
                 progress_callback(msg)
-        
+
         # Convert from current-level indices to full-dataset indices
         current_mask = self.current_level.index_mask
         full_indices = current_mask[selected_indices]
@@ -246,18 +269,16 @@ class ZoomManager:
     def map_to_current_indices(self, full_indices: np.ndarray) -> np.ndarray:
         """
         Map full-dataset indices to current-level indices.
-        
+
         Args:
             full_indices: Indices into full dataset
-            
+
         Returns:
             Indices into current level's data, or -1 for items not in current level
         """
-        current_mask = self.current_level.index_mask
-        
-        # Create mapping: full_idx -> current_idx
-        full_to_current = {full_idx: i for i, full_idx in enumerate(current_mask)}
-        
+        # Use cached lookup from current level
+        full_to_current = self.current_level.get_index_lookup()
+
         return np.array([
             full_to_current.get(idx, -1) for idx in full_indices
         ])

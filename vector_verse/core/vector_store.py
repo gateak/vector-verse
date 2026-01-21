@@ -102,12 +102,17 @@ class VectorStore:
         # Initialize cache manager
         self._cache = CacheManager(self.cache_key)
         
-        # Check if we should use cache
-        use_cache = not self.force_rebuild and self._cache.exists()
-        
-        if use_cache:
+        # Check cache state
+        if self.force_rebuild:
+            log("Force rebuild requested, computing from scratch...")
+            self._build_from_scratch(log)
+        elif self._cache.is_complete():
             log("Loading from cache...")
             self._load_from_cache()
+        elif self._cache.has_embeddings():
+            # Partial cache: embeddings exist but UMAP missing
+            log("Found embeddings cache, rebuilding UMAP...")
+            self._rebuild_umap_from_cached_embeddings(log)
         else:
             log("Building embeddings (this may take a few minutes)...")
             self._build_from_scratch(log)
@@ -125,21 +130,38 @@ class VectorStore:
         """Load embeddings and UMAP from cache."""
         # Load embeddings
         self.embeddings, cached_ids = self._cache.load_embeddings()
-        
+
         # Load items
         self.items_df = self._cache.load_items()
-        
+
         # Load 2D UMAP
         self.projector = UMAPProjector()
-        if self._cache.has_umap():
-            self.umap_coords = self._cache.load_umap_coords()
-            self.projector.set_model(self._cache.load_umap_model())
-        
+        self.umap_coords = self._cache.load_umap_coords()
+        self.projector.set_model(self._cache.load_umap_model())
+
         # Load 3D UMAP if available
         self.projector_3d = UMAPProjector(n_components=3)
         if self._cache.has_umap_3d():
             self.umap_coords_3d = self._cache.load_umap_coords_3d()
             self.projector_3d.set_model(self._cache.load_umap_model_3d())
+
+    def _rebuild_umap_from_cached_embeddings(self, log: Callable[[str], None]) -> None:
+        """Rebuild UMAP from cached embeddings (handles partial cache state)."""
+        # Load existing embeddings and items
+        self.embeddings, cached_ids = self._cache.load_embeddings()
+        self.items_df = self._cache.load_items()
+
+        log(f"Loaded {len(self.items_df)} items from cache")
+        log(f"Embeddings shape: {self.embeddings.shape}")
+
+        # Fit UMAP
+        log("Fitting UMAP projection (this takes a minute)...")
+        self.projector = UMAPProjector()
+        self.umap_coords = self.projector.fit(self.embeddings, show_progress=False)
+
+        # Save UMAP to cache
+        log("Saving UMAP to cache...")
+        self._cache.save_umap(self.umap_coords, self.projector.get_model())
     
     def _build_from_scratch(self, log: Callable[[str], None]) -> None:
         """Compute embeddings and UMAP from scratch."""

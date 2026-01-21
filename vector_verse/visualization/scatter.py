@@ -54,7 +54,81 @@ class ScatterPlotBuilder:
         "selected": dict(symbol="circle", size=14, opacity=1.0),
         "neighbor": dict(symbol="circle", size=10, opacity=0.8),
     }
-    
+
+    # 3D symbol mapping (star not available in 3D, use diamond)
+    SYMBOL_3D_MAP = {
+        "circle": "circle",
+        "diamond": "diamond",
+        "star": "diamond",
+        "square": "square",
+    }
+
+    # Constants
+    MAX_LEGEND_LABEL_LENGTH = 20
+
+    # -------------------------------------------------------------------------
+    # Shared helper methods for 2D/3D deduplication
+    # -------------------------------------------------------------------------
+
+    def _flatten_list_column(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Flatten a list column by taking the first element."""
+        if df[column].apply(lambda x: isinstance(x, list)).any():
+            df = df.copy()
+            df[column] = df[column].apply(
+                lambda x: x[0] if isinstance(x, list) and len(x) > 0 else (x if not isinstance(x, list) else None)
+            )
+        return df
+
+    def _prepare_categorical_groups(
+        self,
+        df: pd.DataFrame,
+        color_by: str,
+        top_n: int
+    ) -> tuple[pd.DataFrame, list]:
+        """
+        Prepare data for categorical coloring by grouping into top N + Other + Unknown.
+
+        Returns:
+            Tuple of (prepared DataFrame with _color_group column, ordered list of categories)
+        """
+        df = self._flatten_list_column(df, color_by)
+
+        value_counts = df[color_by].value_counts()
+        top_values = set(value_counts.head(top_n).index)
+
+        df = df.copy()
+        df["_color_group"] = df[color_by].apply(
+            lambda x: x if x in top_values else "Other" if pd.notna(x) else "Unknown"
+        )
+
+        categories = (
+            [v for v in value_counts.index if v in top_values] +
+            (["Other"] if (df["_color_group"] == "Other").any() else []) +
+            (["Unknown"] if (df["_color_group"] == "Unknown").any() else [])
+        )
+
+        return df, categories
+
+    def _get_category_color(self, category: str, index: int) -> str:
+        """Get color for a category based on its name or index."""
+        if category == "Other":
+            return "#6b7280"
+        elif category == "Unknown":
+            return "#4b5563"
+        else:
+            return self.CATEGORICAL_COLORS[index % len(self.CATEGORICAL_COLORS)]
+
+    def _truncate_legend_label(self, label: str) -> str:
+        """Truncate a label for legend display."""
+        label_str = str(label)
+        if len(label_str) > self.MAX_LEGEND_LABEL_LENGTH:
+            return label_str[:self.MAX_LEGEND_LABEL_LENGTH] + "..."
+        return label_str
+
+    def _get_marker_settings_for_source(self, source: str) -> dict:
+        """Get marker settings for a source type."""
+        return self.MARKERS.get(source, self.MARKERS.get("poetry")).copy()
+
     def __init__(
         self,
         height: int = config.PLOT_HEIGHT,
@@ -116,11 +190,12 @@ class ScatterPlotBuilder:
                 color_type=color_type,
                 top_n_categories=top_n_categories,
             )
-        
-        # Ensure we have coordinate columns
+
+        # Ensure we have coordinate columns and global index for lasso selection
         df = df.copy()
         df["x"] = coords[:, 0]
         df["y"] = coords[:, 1]
+        df["_global_idx"] = np.arange(len(df))
         
         # Initialize figure
         fig = go.Figure()
@@ -156,7 +231,10 @@ class ScatterPlotBuilder:
                     text=self._build_hover_text(neighbor_df),
                     hovertemplate="%{text}<extra></extra>",
                     name="Similar",
-                    customdata=neighbor_df["id"].values
+                    customdata=np.column_stack([
+                        neighbor_df["id"].values,
+                        neighbor_df["_global_idx"].values
+                    ])
                 ))
         
         # Add selected item highlight
@@ -175,7 +253,10 @@ class ScatterPlotBuilder:
                     text=self._build_hover_text(selected_df),
                     hovertemplate="%{text}<extra></extra>",
                     name="Selected",
-                    customdata=selected_df["id"].values
+                    customdata=np.column_stack([
+                        selected_df["id"].values,
+                        selected_df["_global_idx"].values
+                    ])
                 ))
         
         # Add query point
@@ -268,7 +349,10 @@ class ScatterPlotBuilder:
                 text=self._build_hover_text(source_df),
                 hovertemplate="%{text}<extra></extra>",
                 name=source.title(),
-                customdata=source_df["id"].values
+                customdata=np.column_stack([
+                    source_df["id"].values,
+                    source_df["_global_idx"].values
+                ])
             ))
         
         return fig
@@ -310,65 +394,35 @@ class ScatterPlotBuilder:
     ) -> go.Figure:
         """Add traces for categorical coloring (one trace per category)."""
         fig = go.Figure()
-        
-        # Handle list columns (like hashtags)
-        if df[color_by].apply(lambda x: isinstance(x, list)).any():
-            # Explode list column and take first item
-            df = df.copy()
-            df[color_by] = df[color_by].apply(
-                lambda x: x[0] if isinstance(x, list) and len(x) > 0 else (x if not isinstance(x, list) else None)
-            )
-        
-        # Get value counts and identify top N
-        value_counts = df[color_by].value_counts()
-        top_values = set(value_counts.head(top_n).index)
-        
-        # Create "Other" category
-        df = df.copy()
-        df["_color_group"] = df[color_by].apply(
-            lambda x: x if x in top_values else "Other" if pd.notna(x) else "Unknown"
-        )
-        
-        # Sort categories: top values by count, then Other, then Unknown
-        categories = (
-            [v for v in value_counts.index if v in top_values] +
-            (["Other"] if (df["_color_group"] == "Other").any() else []) +
-            (["Unknown"] if (df["_color_group"] == "Unknown").any() else [])
-        )
-        
+
+        # Use shared helper to prepare categorical groups
+        df, categories = self._prepare_categorical_groups(df, color_by, top_n)
+
         # Add trace for each category
         for i, category in enumerate(categories):
             cat_df = df[df["_color_group"] == category]
-            
+
             if cat_df.empty:
                 continue
-            
-            # Select color
-            if category == "Other":
-                color = "#6b7280"  # Gray
-            elif category == "Unknown":
-                color = "#4b5563"  # Darker gray
-            else:
-                color = self.CATEGORICAL_COLORS[i % len(self.CATEGORICAL_COLORS)]
-            
-            # Truncate legend label
-            legend_label = str(category)[:20] + ("..." if len(str(category)) > 20 else "")
-            
+
+            color = self._get_category_color(category, i)
+            legend_label = self._truncate_legend_label(category)
+
             fig.add_trace(go.Scatter(
                 x=cat_df["x"],
                 y=cat_df["y"],
                 mode="markers",
-                marker=dict(
-                    color=color,
-                    **marker_settings
-                ),
+                marker=dict(color=color, **marker_settings),
                 text=self._build_hover_text(cat_df, extra_field=color_by),
                 hovertemplate="%{text}<extra></extra>",
                 name=legend_label,
-                customdata=cat_df["id"].values,
+                customdata=np.column_stack([
+                    cat_df["id"].values,
+                    cat_df["_global_idx"].values
+                ]),
                 legendgroup=category,
             ))
-        
+
         return fig
     
     def _add_sequential_trace(
@@ -409,7 +463,10 @@ class ScatterPlotBuilder:
                 text=self._build_hover_text(plot_df, extra_field=color_by),
                 hovertemplate="%{text}<extra></extra>",
                 name=color_by.title(),
-                customdata=plot_df["id"].values
+                customdata=np.column_stack([
+                    plot_df["id"].values,
+                    plot_df["_global_idx"].values
+                ])
             ))
         
         # Add NaN values separately
@@ -426,7 +483,10 @@ class ScatterPlotBuilder:
                 text=self._build_hover_text(nan_df),
                 hovertemplate="%{text}<extra></extra>",
                 name="Unknown",
-                customdata=nan_df["id"].values
+                customdata=np.column_stack([
+                    nan_df["id"].values,
+                    nan_df["_global_idx"].values
+                ])
             ))
         
         return fig
@@ -578,16 +638,20 @@ class ScatterPlotBuilder:
     ) -> go.Figure:
         """Build 3D plot colored by source type."""
         fig = go.Figure()
-        
+
         for source in df["source"].unique():
             source_df = df[(df["source"] == source) & (~df["id"].isin(special_ids))]
-            
+
             if source_df.empty:
                 continue
-            
+
             color = self.COLORS.get(source, self.COLORS["default"])
-            marker_settings = self.MARKERS.get(source, self.MARKERS.get("poetry"))
-            
+            marker_settings = self.MARKERS.get(source, self.MARKERS.get("poetry")).copy()
+
+            # Map 2D symbol to 3D-compatible symbol
+            symbol_2d = marker_settings.get("symbol", "circle")
+            symbol_3d = self.SYMBOL_3D_MAP.get(symbol_2d, "circle")
+
             fig.add_trace(go.Scatter3d(
                 x=source_df["x"],
                 y=source_df["y"],
@@ -597,13 +661,14 @@ class ScatterPlotBuilder:
                     color=color,
                     size=marker_settings.get("size", 5),
                     opacity=marker_settings.get("opacity", 0.6),
+                    symbol=symbol_3d,
                 ),
                 text=self._build_hover_text(source_df),
                 hovertemplate="%{text}<extra></extra>",
                 name=source.title(),
                 customdata=source_df["id"].values
             ))
-        
+
         return fig
     
     def _build_3d_colored_by_field(
@@ -616,58 +681,34 @@ class ScatterPlotBuilder:
     ) -> go.Figure:
         """Build 3D plot colored by a metadata field."""
         fig = go.Figure()
-        
+
         # Filter out special items
         plot_df = df[~df["id"].isin(special_ids)].copy()
-        
+
         if plot_df.empty:
             return fig
-        
+
         # Get marker settings from first source
         first_source = plot_df["source"].iloc[0] if "source" in plot_df.columns else "poetry"
-        marker_settings = self.MARKERS.get(first_source, self.MARKERS.get("poetry"))
-        
+        marker_settings = self._get_marker_settings_for_source(first_source)
+
+        # Map 2D symbol to 3D-compatible symbol
+        symbol_3d = self.SYMBOL_3D_MAP.get(marker_settings.get("symbol", "circle"), "circle")
+
         if color_type == "categorical":
-            # Handle list columns
-            if plot_df[color_by].apply(lambda x: isinstance(x, list)).any():
-                plot_df = plot_df.copy()
-                plot_df[color_by] = plot_df[color_by].apply(
-                    lambda x: x[0] if isinstance(x, list) and len(x) > 0 else (x if not isinstance(x, list) else None)
-                )
-            
-            # Get value counts and identify top N
-            value_counts = plot_df[color_by].value_counts()
-            top_values = set(value_counts.head(top_n).index)
-            
-            # Create "Other" category
-            plot_df = plot_df.copy()
-            plot_df["_color_group"] = plot_df[color_by].apply(
-                lambda x: x if x in top_values else "Other" if pd.notna(x) else "Unknown"
-            )
-            
-            # Sort categories
-            categories = (
-                [v for v in value_counts.index if v in top_values] +
-                (["Other"] if (plot_df["_color_group"] == "Other").any() else []) +
-                (["Unknown"] if (plot_df["_color_group"] == "Unknown").any() else [])
-            )
-            
+            # Use shared helper to prepare categorical groups
+            plot_df, categories = self._prepare_categorical_groups(plot_df, color_by, top_n)
+
             # Add trace for each category
             for i, category in enumerate(categories):
                 cat_df = plot_df[plot_df["_color_group"] == category]
-                
+
                 if cat_df.empty:
                     continue
-                
-                if category == "Other":
-                    color = "#6b7280"
-                elif category == "Unknown":
-                    color = "#4b5563"
-                else:
-                    color = self.CATEGORICAL_COLORS[i % len(self.CATEGORICAL_COLORS)]
-                
-                legend_label = str(category)[:20] + ("..." if len(str(category)) > 20 else "")
-                
+
+                color = self._get_category_color(category, i)
+                legend_label = self._truncate_legend_label(category)
+
                 fig.add_trace(go.Scatter3d(
                     x=cat_df["x"],
                     y=cat_df["y"],
@@ -677,6 +718,7 @@ class ScatterPlotBuilder:
                         color=color,
                         size=marker_settings.get("size", 5),
                         opacity=marker_settings.get("opacity", 0.6),
+                        symbol=symbol_3d,
                     ),
                     text=self._build_hover_text(cat_df, extra_field=color_by),
                     hovertemplate="%{text}<extra></extra>",
@@ -688,11 +730,11 @@ class ScatterPlotBuilder:
             # Sequential coloring
             color_values = pd.to_numeric(plot_df[color_by], errors="coerce")
             has_values = ~color_values.isna()
-            
+
             if has_values.any():
                 valid_df = plot_df[has_values]
                 valid_values = color_values[has_values]
-                
+
                 fig.add_trace(go.Scatter3d(
                     x=valid_df["x"],
                     y=valid_df["y"],
@@ -702,20 +744,17 @@ class ScatterPlotBuilder:
                         color=valid_values,
                         colorscale="Viridis",
                         showscale=True,
-                        colorbar=dict(
-                            title=color_by.title(),
-                            thickness=15,
-                            len=0.5,
-                        ),
+                        colorbar=dict(title=color_by.title(), thickness=15, len=0.5),
                         size=marker_settings.get("size", 5),
                         opacity=marker_settings.get("opacity", 0.6),
+                        symbol=symbol_3d,
                     ),
                     text=self._build_hover_text(valid_df, extra_field=color_by),
                     hovertemplate="%{text}<extra></extra>",
                     name=color_by.title(),
                     customdata=valid_df["id"].values
                 ))
-            
+
             # Add NaN values
             if (~has_values).any():
                 nan_df = plot_df[~has_values]
@@ -728,13 +767,14 @@ class ScatterPlotBuilder:
                         color="#4b5563",
                         size=marker_settings.get("size", 5),
                         opacity=marker_settings.get("opacity", 0.6),
+                        symbol=symbol_3d,
                     ),
                     text=self._build_hover_text(nan_df),
                     hovertemplate="%{text}<extra></extra>",
                     name="Unknown",
                     customdata=nan_df["id"].values
                 ))
-        
+
         return fig
     
     def _build_hover_text(

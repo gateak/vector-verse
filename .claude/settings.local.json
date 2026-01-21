@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(/Users/akbar/src/vector-verse/venv/bin/python:*)",
+      "Bash(python:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(timeout 8 streamlit run:*)"
+    ]
+  }
+}

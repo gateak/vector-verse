@@ -259,30 +259,15 @@ class LyricsCsvLoader(BaseDatasetLoader):
     def _auto_detect_columns(self, columns: list[str]) -> dict:
         """
         Auto-detect column mapping from available columns.
-        
+
         Args:
             columns: List of column names in the CSV
-            
+
         Returns:
             Mapping from normalized names to actual column names
         """
-        mapping = {}
-        columns_lower = {c.lower(): c for c in columns}
-        
-        # Try each preset
-        for preset_name, preset in self.COLUMN_PRESETS.items():
-            for target, candidates in preset.items():
-                if target in mapping:
-                    continue
-                for candidate in candidates:
-                    if candidate in columns:
-                        mapping[target] = candidate
-                        break
-                    elif candidate.lower() in columns_lower:
-                        mapping[target] = columns_lower[candidate.lower()]
-                        break
-        
-        return mapping
+        # Use shared base class method with this loader's presets
+        return super()._auto_detect_columns(columns, self.COLUMN_PRESETS)
     
     def _normalize_columns(self, df: pd.DataFrame, column_map: dict) -> pd.DataFrame:
         """
@@ -296,10 +281,7 @@ class LyricsCsvLoader(BaseDatasetLoader):
             DataFrame with normalized columns
         """
         normalized = pd.DataFrame()
-        
-        # Store source metadata
-        normalized["source_meta"] = df.apply(lambda row: row.to_dict(), axis=1)
-        
+
         # Text (required) - lyrics content
         text_col = column_map.get("text")
         if text_col and text_col in df.columns:

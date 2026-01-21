@@ -54,14 +54,30 @@ class BaseEmbedder(ABC):
         """
         pass
     
+    def embed_single(self, text: str) -> np.ndarray:
+        """
+        Embed a single text string.
+
+        Args:
+            text: Text to embed
+
+        Returns:
+            np.ndarray of shape (dimension,), L2-normalized
+
+        Note:
+            Subclasses may override for efficiency, but the default
+            implementation just calls embed([text])[0].
+        """
+        return self.embed([text])[0]
+
     @staticmethod
     def normalize(vectors: np.ndarray) -> np.ndarray:
         """
         L2-normalize vectors for cosine similarity.
-        
+
         Args:
             vectors: Array of shape (n, dim)
-            
+
         Returns:
             Normalized array of same shape
         """
@@ -78,13 +94,23 @@ _EMBEDDER_REGISTRY: dict[str, type[BaseEmbedder]] = {}
 def register_embedder(name: str):
     """
     Decorator to register an embedder class.
-    
+
     Usage:
         @register_embedder("openai")
         class OpenAIEmbedder(BaseEmbedder):
             ...
+
+    Raises:
+        TypeError: If class doesn't inherit from BaseEmbedder
+        ValueError: If name is already registered
     """
     def decorator(cls: type[BaseEmbedder]):
+        if not issubclass(cls, BaseEmbedder):
+            raise TypeError(f"{cls.__name__} must inherit from BaseEmbedder")
+        if name in _EMBEDDER_REGISTRY:
+            raise ValueError(
+                f"Embedder '{name}' already registered by {_EMBEDDER_REGISTRY[name].__name__}"
+            )
         _EMBEDDER_REGISTRY[name] = cls
         return cls
     return decorator

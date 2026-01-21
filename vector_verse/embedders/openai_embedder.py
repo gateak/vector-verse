@@ -3,6 +3,7 @@ OpenAI embedding backend.
 Uses text-embedding-3-small for high-quality multilingual embeddings.
 """
 
+import logging
 import os
 import time
 from typing import Optional, Callable
@@ -10,6 +11,8 @@ from typing import Optional, Callable
 import numpy as np
 from openai import OpenAI
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 from .base import BaseEmbedder, register_embedder
 import config
@@ -67,9 +70,12 @@ class OpenAIEmbedder(BaseEmbedder):
     def dimension(self) -> int:
         return self._dimension
     
-    # OpenAI's max tokens per embedding request
+    # OpenAI's token limits
     MAX_TOKENS_PER_REQUEST = 290000  # Leave some buffer below 300k limit
-    CHARS_PER_TOKEN_ESTIMATE = 3.5  # Conservative estimate
+    MAX_TOKENS_PER_TEXT = 8191  # Model's max tokens per individual text
+    CHARS_PER_TOKEN_ESTIMATE = 3.5  # Conservative estimate for batching
+    # Max chars per text: 8191 tokens * 3.5 chars/token ≈ 28k, but use 25k for safety
+    MAX_CHARS_PER_TEXT = 25000
     
     def embed(
         self,
@@ -212,26 +218,28 @@ class OpenAIEmbedder(BaseEmbedder):
         
         raise RuntimeError(f"Failed to embed batch after {max_retries} attempts")
     
-    def _clean_text(self, text: str, max_chars: int = 20000) -> str:
+    def _clean_text(self, text: str) -> str:
         """
         Clean and truncate text for embedding.
-        
+
         Args:
             text: Raw text
-            max_chars: Maximum characters (conservative limit for 8191 token model)
-            
+
         Returns:
-            Cleaned text
+            Cleaned text, truncated to MAX_CHARS_PER_TEXT if needed
         """
         if not text:
             return " "  # Empty strings cause API errors
-        
+
         # Basic cleaning
         text = str(text).strip()
-        
-        # Conservative truncation to stay under 8191 token limit
-        # Using ~2.5 chars per token estimate to be safe with varied content
-        if len(text) > max_chars:
-            text = text[:max_chars]
-        
+
+        # Truncate to stay under 8191 token limit
+        if len(text) > self.MAX_CHARS_PER_TEXT:
+            logger.warning(
+                f"Text truncated from {len(text)} to {self.MAX_CHARS_PER_TEXT} chars "
+                f"(exceeds token limit)"
+            )
+            text = text[:self.MAX_CHARS_PER_TEXT]
+
         return text or " "
