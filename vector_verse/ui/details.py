@@ -122,7 +122,7 @@ def render_neighbors_list(neighbors: pd.DataFrame, title: str = "Similar Items")
             if st.button(
                 f"📄 {title_text}",
                 key=f"neighbor_{idx}_{neighbor['id']}",
-                use_container_width=True
+                width="stretch"
             ):
                 AppState.set_selected_item(neighbor["id"])
                 st.rerun()

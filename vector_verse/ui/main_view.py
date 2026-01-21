@@ -30,7 +30,7 @@ def render_search_bar(vs: "VectorStore", zm: "ZoomManager") -> None:
         )
 
     with col2:
-        search_clicked = st.button("Search", type="primary", use_container_width=True)
+        search_clicked = st.button("Search", type="primary", width="stretch")
 
     if search_clicked and query.strip():
         _perform_search(vs, zm, query.strip())
@@ -66,13 +66,13 @@ def render_zoom_controls(zm: "ZoomManager") -> None:
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        if st.button("Back", use_container_width=True):
+        if st.button("Back", width="stretch"):
             zm.zoom_out()
             AppState.reset_for_zoom_change()
             st.rerun()
 
     with col2:
-        if st.button("Reset", use_container_width=True):
+        if st.button("Reset", width="stretch"):
             zm.reset_to_root()
             AppState.reset_for_zoom_change()
             st.rerun()
@@ -93,10 +93,10 @@ def render_zoom_button(vs: "VectorStore", zm: "ZoomManager") -> None:
     with col1:
         st.info(f"🔍 {n_selected} items selected")
     with col2:
-        if st.button("Zoom Into Selection", type="primary", use_container_width=True):
+        if st.button("Zoom Into Selection", type="primary", width="stretch"):
             _perform_zoom(vs, zm)
 
-    if st.button("Clear Selection", use_container_width=True):
+    if st.button("Clear Selection", width="stretch"):
         AppState.clear_lasso_selection()
         st.rerun()
 
@@ -166,7 +166,7 @@ def render_visualization(vs: "VectorStore", zm: "ZoomManager") -> None:
 
     # Render
     if is_3d:
-        st.plotly_chart(fig, use_container_width=True, key="umap_plot_3d")
+        st.plotly_chart(fig, width="stretch", key="umap_plot_3d")
     else:
         _render_2d_with_selection(fig)
 
@@ -204,7 +204,7 @@ def _render_2d_with_selection(fig) -> None:
     """Render 2D plot with lasso selection handling."""
     selection = st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch",
         key="umap_plot",
         on_select="rerun",
         selection_mode="lasso"

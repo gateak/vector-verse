@@ -5,7 +5,11 @@ Main Streamlit application entry point.
 Run with: streamlit run app.py
 """
 
+# Fix Numba threading conflict with Streamlit reruns
+# Must be set before importing any library that uses Numba (e.g., umap)
 import os
+os.environ["NUMBA_NUM_THREADS"] = "1"
+
 import streamlit as st
 from dotenv import load_dotenv
 
