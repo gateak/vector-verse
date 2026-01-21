@@ -80,9 +80,9 @@ def setup_environment() -> bool:
 
 
 @st.cache_resource(show_spinner=False)
-def get_vector_store(dataset_key: str) -> VectorStore:
+def get_vector_store(dataset_key: str, sample_size: int | None = 5000) -> VectorStore:
     """Get or create cached VectorStore."""
-    loader = get_loader(dataset_key)
+    loader = get_loader(dataset_key, max_items=sample_size)
     return VectorStore(dataset_loader=loader)
 
 
@@ -106,7 +106,10 @@ def get_zoom_manager(vs: VectorStore) -> ZoomManager:
 def run_explore_tab() -> None:
     """Run the main exploration interface."""
     # Get vector store
-    vs = get_vector_store(st.session_state.current_dataset)
+    vs = get_vector_store(
+        st.session_state.current_dataset,
+        st.session_state.sample_size
+    )
 
     # Initialize if needed
     if not vs.is_initialized:

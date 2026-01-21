@@ -90,12 +90,12 @@ class TweetsCsvLoader(BaseDatasetLoader):
     ):
         """
         Initialize the tweets loader.
-        
+
         Args:
             data_dir: Directory containing tweet CSVs (default: data/tweets/)
             csv_file: Specific CSV file to load (auto-detected if not provided)
             column_map: Custom column mapping override
-            max_items: Maximum number of items to load
+            max_items: Max items to randomly sample (None for all)
             clean_options: Text cleaning options
         """
         self.data_dir = Path(data_dir) if data_dir else config.DATA_DIR / "tweets"
@@ -158,9 +158,9 @@ class TweetsCsvLoader(BaseDatasetLoader):
         df["author"] = df.get("user", pd.Series(["Unknown"] * len(df)))
         df["author"] = df["author"].fillna("Unknown")
         
-        # 8. Limit items if specified
-        if self.max_items:
-            df = df.head(self.max_items)
+        # 8. Random sample if specified
+        if self.max_items and len(df) > self.max_items:
+            df = df.sample(n=self.max_items, random_state=42)
         
         # 9. Validate and return
         return self.validate(df)

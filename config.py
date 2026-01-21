@@ -59,6 +59,13 @@ AVAILABLE_DATASETS = {
         "data_check": lambda: TWEETS_DATA_DIR.exists() and any(TWEETS_DATA_DIR.glob("*.csv")),
         "color_dimensions": ["user", "hashtag", "date_bucket", "label", "region", "language"],
     },
+    "combined_tweets": {
+        "loader": "combined_tweets",
+        "label": "🔍 Tweet Sources",
+        "description": "Compare tweets from multiple sources (bots, sentiment, etc.)",
+        "data_check": lambda: TWEETS_DATA_DIR.exists() and len(list(TWEETS_DATA_DIR.glob("*.csv"))) >= 2,
+        "color_dimensions": ["tweet_type", "sentiment", "author", "hashtag"],
+    },
     "lyrics": {
         "loader": "lyrics",
         "label": "🎵 Lyrics",

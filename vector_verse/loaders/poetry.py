@@ -30,10 +30,10 @@ class PoetryLoader(BaseDatasetLoader):
     ):
         """
         Initialize the poetry loader.
-        
+
         Args:
             csv_path: Path to the CSV file (defaults to config.POETRY_CSV_PATH)
-            max_items: Optional limit on number of items to load (for testing)
+            max_items: Max items to randomly sample (None for all)
         """
         self.csv_path = Path(csv_path) if csv_path else config.POETRY_CSV_PATH
         self.max_items = max_items
@@ -71,9 +71,9 @@ class PoetryLoader(BaseDatasetLoader):
         # Generate unique IDs
         df["id"] = [f"poetry_{i}" for i in range(len(df))]
         
-        # Limit items if specified
-        if self.max_items is not None:
-            df = df.head(self.max_items)
+        # Random sample if specified
+        if self.max_items is not None and len(df) > self.max_items:
+            df = df.sample(n=self.max_items, random_state=42)
         
         # Validate and return
         return self.validate(df)

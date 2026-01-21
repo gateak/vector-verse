@@ -70,8 +70,15 @@ class VectorStore:
     
     @property
     def cache_key(self) -> str:
-        """Generate unique cache key for this dataset+embedder combination."""
-        return f"{self.dataset_loader.name}_{self.embedder.name}"
+        """Generate unique cache key for this dataset+embedder+sample combination."""
+        max_items = getattr(self.dataset_loader, 'max_items', None)
+        # For combined_tweets, use max_per_type * 2
+        if max_items is None:
+            max_per_type = getattr(self.dataset_loader, 'max_per_type', None)
+            if max_per_type:
+                max_items = max_per_type * 2
+        sample_suffix = f"_n{max_items}" if max_items else "_all"
+        return f"{self.dataset_loader.name}_{self.embedder.name}{sample_suffix}"
     
     @property
     def is_initialized(self) -> bool:

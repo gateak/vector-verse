@@ -24,6 +24,7 @@ class StateDefaults:
     lasso_selection: Optional[List[int]] = None
     view_3d: bool = False
     last_error: Optional[str] = None
+    sample_size: Optional[int] = 5000  # None means all items
 
 
 class AppState:

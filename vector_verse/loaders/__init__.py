@@ -7,6 +7,7 @@ from .poetry import PoetryLoader
 from .custom import CustomItemsLoader
 from .tweets import TweetsCsvLoader
 from .lyrics import LyricsCsvLoader
+from .combined_tweets import CombinedTweetsLoader
 
 __all__ = [
     "BaseDatasetLoader",
@@ -17,4 +18,5 @@ __all__ = [
     "CustomItemsLoader",
     "TweetsCsvLoader",
     "LyricsCsvLoader",
+    "CombinedTweetsLoader",
 ]

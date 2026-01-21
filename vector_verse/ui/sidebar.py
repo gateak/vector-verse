@@ -22,6 +22,8 @@ def render_sidebar(vs: "VectorStore", zm: "ZoomManager") -> None:
     with st.sidebar:
         render_dataset_switcher()
         st.markdown("---")
+        render_sample_size()
+        st.markdown("---")
         render_dataset_info(vs)
         st.markdown("---")
         render_color_selector()
@@ -70,6 +72,51 @@ def render_dataset_switcher() -> None:
         AppState.reset_for_dataset_change()
         st.cache_resource.clear()
         st.rerun()
+
+
+def render_sample_size() -> None:
+    """Render sample size control."""
+    st.markdown("### Sample Size")
+
+    current_sample = st.session_state.sample_size
+    is_load_all = current_sample is None
+
+    load_all = st.checkbox(
+        "Load all items",
+        value=is_load_all,
+        help="Load entire dataset (slower, uses more memory)"
+    )
+
+    # Handle checkbox change
+    if load_all and not is_load_all:
+        # User just checked "Load all"
+        st.session_state.sample_size = None
+        AppState.reset_for_dataset_change()
+        st.cache_resource.clear()
+        st.rerun()
+    elif not load_all and is_load_all:
+        # User just unchecked "Load all" - set default
+        st.session_state.sample_size = 5000
+        AppState.reset_for_dataset_change()
+        st.cache_resource.clear()
+        st.rerun()
+
+    # Show slider only when not loading all
+    if not load_all:
+        new_sample_size = st.slider(
+            "Max items to load:",
+            min_value=1000,
+            max_value=50000,
+            value=current_sample or 5000,
+            step=1000,
+            help="Randomly sample this many items from the dataset"
+        )
+
+        if new_sample_size != current_sample:
+            st.session_state.sample_size = new_sample_size
+            AppState.reset_for_dataset_change()
+            st.cache_resource.clear()
+            st.rerun()
 
 
 def render_dataset_info(vs: "VectorStore") -> None:

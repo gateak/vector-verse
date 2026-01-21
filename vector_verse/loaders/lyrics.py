@@ -69,12 +69,12 @@ class LyricsCsvLoader(BaseDatasetLoader):
     ):
         """
         Initialize the lyrics loader.
-        
+
         Args:
             data_dir: Directory containing lyrics CSVs (default: data/lyrics/)
             csv_file: Specific CSV file to load (auto-detected if not provided)
             column_map: Custom column mapping override
-            max_items: Maximum number of items to load
+            max_items: Max items to randomly sample (None for all)
             strip_section_markers: Remove [Chorus], [Verse], etc.
             min_lyrics_length: Minimum character length for lyrics
         """
@@ -132,9 +132,9 @@ class LyricsCsvLoader(BaseDatasetLoader):
             df["decade"] = (df["year"] // 10 * 10).astype("Int64").astype(str) + "s"
             df.loc[df["year"].isna(), "decade"] = None
         
-        # 7. Limit items if specified
-        if self.max_items:
-            df = df.head(self.max_items)
+        # 7. Random sample if specified
+        if self.max_items and len(df) > self.max_items:
+            df = df.sample(n=self.max_items, random_state=42)
         
         # 8. Validate and return
         return self.validate(df)
