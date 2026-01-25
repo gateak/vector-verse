@@ -45,12 +45,22 @@ VectorStore (core/vector_store.py)
 ├── Manages cache key as {dataset_name}_{embedder_name}
 └── Provides similarity search scoped to zoom level
 
+UMAPProjector (core/projector.py)
+├── Fits UMAP on corpus embeddings
+├── Projects new queries onto existing space
+└── Configurable parameters (n_neighbors, min_dist, metric)
+
 ZoomManager (core/zoom_manager.py)
 ├── Hierarchical exploration: re-runs UMAP on selected subsets
 └── MIN_ITEMS_FOR_ZOOM = 3 (validates selection size)
 
-CacheManager (cache/manager.py)
+CacheManager (vector_verse/cache/manager.py)
 └── Persists: embeddings.npz, items.parquet, umap_coords.npz, umap_model.pkl
+
+ScatterPlotBuilder (visualization/scatter.py)
+├── Builds interactive Plotly 2D/3D scatter plots
+├── Handles color dimension mapping and symbol assignment
+└── SYMBOL_3D_MAP maps 2D symbols to 3D-compatible versions
 ```
 
 ### UI Components (`vector_verse/ui/`)
@@ -71,7 +81,6 @@ ui/
 **Key classes:**
 - `AppState` - Static methods for session state (init, reset_for_dataset_change, set_search_results, etc.)
 - `Theme` - Frozen dataclass with color constants
-- `ScatterPlotBuilder.SYMBOL_3D_MAP` - Maps 2D symbols to 3D-compatible symbols
 
 ### Data Flow
 
